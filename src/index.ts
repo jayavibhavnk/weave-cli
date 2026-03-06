@@ -12,7 +12,7 @@ import {
 } from "./config.js";
 import { t, icons, banner, table, successLine, errorLine } from "./ui/theme.js";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 
 const program = new Command();
 
@@ -420,6 +420,29 @@ wsCmd
     fabric.close();
 
     console.log(successLine(`Workspace ${t.accent(name)} created.`));
+  });
+
+// ── weave web ──────────────────────────────────────────────
+program
+  .command("web")
+  .description("Open the memory graph viewer in your browser")
+  .option("-p, --port <port>", "Port number", "3333")
+  .option("-w, --workspace <name>", "Workspace to visualize", "default")
+  .action(async (options) => {
+    const config = loadConfig();
+    const workspacePath = getWorkspacePath(options.workspace);
+
+    const { MemoryFabric } = await import("./core/fabric.js");
+    const fabric = await MemoryFabric.create({ ...config, workspacePath });
+    const stats = fabric.getStats();
+
+    console.log(banner(VERSION));
+    console.log(successLine(`Memory graph: ${stats.nodes} nodes, ${stats.edges} edges`));
+
+    const { startWebViewer } = await import("./web/server.js");
+    await startWebViewer(fabric, parseInt(options.port));
+
+    console.log(`\n  ${t.dim("Press Ctrl+C to stop the server.")}\n`);
   });
 
 // ── weave doctor ───────────────────────────────────────────

@@ -1,6 +1,6 @@
 {
   "name": "memweave",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Graph-native memory CLI for AI agents — persistent, multi-agent, cross-session context",
   "type": "module",
   "bin": {

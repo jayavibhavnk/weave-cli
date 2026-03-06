@@ -93,10 +93,13 @@ export interface WeaveConfig {
 }
 
 export interface ChatMessage {
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "tool";
   content: string;
   agentId?: string;
   timestamp?: number;
+  toolCalls?: { id: string; name: string; args: Record<string, unknown> }[];
+  toolCallId?: string;
+  toolResults?: { callId: string; output: string }[];
 }
 
 export function createMemoryNode(

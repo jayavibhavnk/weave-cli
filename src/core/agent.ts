@@ -176,6 +176,13 @@ export class AgentMemory {
       if (p.description) parts.push(p.description);
     }
 
+    const weaveContext = this.loadWeaveContext();
+    if (weaveContext) {
+      parts.push("");
+      parts.push("## Project Context (from WEAVE.md)");
+      parts.push(weaveContext);
+    }
+
     parts.push("");
     parts.push("## Your Persistent Memory");
 
@@ -190,11 +197,33 @@ export class AgentMemory {
       "## Guidelines\n" +
         "- You have persistent memory. Important information is automatically saved between sessions.\n" +
         "- Reference your memories naturally when relevant.\n" +
+        "- You have access to tools for reading/writing files, running commands, and searching code.\n" +
+        "- Use tools when the user asks you to examine, edit, or create files.\n" +
         "- Be concise and helpful.\n" +
         "- If unsure, say so."
     );
 
     return parts.join("\n");
+  }
+
+  private loadWeaveContext(): string | null {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const candidates = ["WEAVE.md", "weave.md", "AGENTS.md"];
+    for (const name of candidates) {
+      const full = path.resolve(process.cwd(), name);
+      if (fs.existsSync(full)) {
+        try {
+          const content = fs.readFileSync(full, "utf-8");
+          return content.length > 4000
+            ? content.substring(0, 4000) + "\n... (truncated)"
+            : content;
+        } catch {
+          return null;
+        }
+      }
+    }
+    return null;
   }
 }
 
