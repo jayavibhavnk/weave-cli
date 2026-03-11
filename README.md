@@ -1,6 +1,8 @@
 # weave
 
-**Graph-native memory CLI for AI agents.** Chat with AI that actually remembers — across sessions, across agents.
+**Testing-native memory CLI for AI agents.** Run multi-step test workflows with persistent memory across sessions and specialized QA agents.
+
+> CLI binary name: `weave-test` (replace any older `weave` examples with `weave-test`).
 
 ```
   ◈ weave v0.1.0
@@ -9,14 +11,15 @@
 
 ## What is Weave?
 
-Weave is a terminal CLI agent (like Claude Code) with a twist: **persistent, graph-structured memory**. Every conversation is remembered. Memories are connected by semantic similarity, temporal sequence, and shared entities. Your agents build knowledge over time — they never cold-start.
+Weave is a terminal CLI agent (like Claude Code) focused on **software testing and quality improvement**. It combines **persistent graph memory** with **multi-agent QA roles** so each run gets smarter over time.
 
-Built on the MemWeave memory architecture:
+Built on the MemWeave memory architecture plus a test orchestration layer:
 - **Multi-layer memory graph** — semantic, temporal, causal, and entity edges
 - **Tiered memory** — working → short-term → long-term → archival with automatic promotion and decay
-- **Multi-agent** — spawn multiple agents with different personas that share a memory fabric
+- **Multi-agent** — testing personas (orchestrator, edge-case hunter, report analyst) share a memory fabric
 - **Hybrid retrieval** — vector similarity + graph traversal for smarter recall
 - **Local-first** — works with just hash-based embeddings + SQLite, no cloud required for memory
+- **Testing pipeline** — command discovery (`lint`, `typecheck`, `test`, `integration`, `e2e`, `build`) with clear run reports
 
 ## Install
 
@@ -43,8 +46,11 @@ weave init
 # Set your API key (or use Codex auth — see below)
 weave config set apiKey sk-your-openai-key
 
-# Start chatting (memories persist automatically)
-weave chat
+# Initialize testing agents
+weave test init
+
+# Run the testing pipeline on current project
+weave test run
 
 # Or use Anthropic
 weave config set provider anthropic
@@ -64,6 +70,27 @@ weave chat
 ```
 
 ## Commands
+
+### Testing (Primary)
+
+```bash
+weave test init                         # create test-focused agents
+weave test run                          # discover and run tests in current dir
+weave test plan                         # preview discovered + autonomous plan
+weave test run --dir ../my-app          # run against another project
+weave test run --workspace release      # keep separate test memory per workspace
+weave test run --provider anthropic     # use another model provider
+weave test run --model gpt-4o-mini      # choose specific model for insights
+weave test run --max-auto 5             # add up to 5 autonomous expansions
+weave test run --no-autonomous          # run only discovered commands
+```
+
+The testing workflow:
+- discovers test commands from project scripts/runtime,
+- optionally proposes additional safe commands using autonomous planning (`--max-auto > 0`),
+- runs them as a multi-step pipeline,
+- analyzes failures and edge-case gaps,
+- persists run intelligence to memory for future sessions.
 
 ### Chat
 

@@ -17,8 +17,8 @@ const VERSION = "0.4.0";
 const program = new Command();
 
 program
-  .name("weave")
-  .description("Graph-native memory CLI for AI agents")
+  .name("weave-test")
+  .description("Testing-native multi-agent CLI with persistent memory")
   .version(VERSION, "-v, --version");
 
 // ── weave chat ─────────────────────────────────────────────
@@ -40,13 +40,13 @@ program
       console.log("");
       console.log(errorLine("No API key found. Set one with:"));
       console.log(
-        `\n  ${t.accent("weave config set apiKey")} ${t.dim("<your-api-key>")}`
+        `\n  ${t.accent("weave-test config set apiKey")} ${t.dim("<your-api-key>")}`
       );
       console.log(
         `  ${t.dim("or set")} ${t.accent("OPENAI_API_KEY")} ${t.dim("/")} ${t.accent("ANTHROPIC_API_KEY")} ${t.dim("env var")}`
       );
       console.log(
-        `  ${t.dim("For OpenAI only: run")} ${t.accent("codex login --api-key <key>")} ${t.dim("then weave will use ~/.codex/auth.json")}\n`
+        `  ${t.dim("For OpenAI only: run")} ${t.accent("codex login --api-key <key>")} ${t.dim("then weave-test will use ~/.codex/auth.json")}\n`
       );
       process.exit(1);
     }
@@ -130,7 +130,7 @@ agentCmd
     const agents = fabric.listAgents();
     if (agents.length === 0) {
       console.log(
-        `\n  ${t.dim("No agents yet. Create one with:")} ${t.accent("weave agent spawn <name>")}\n`
+        `\n  ${t.dim("No agents yet. Create one with:")} ${t.accent("weave-test agent spawn <name>")}\n`
       );
     } else {
       const rows = agents.map((a) => {
@@ -346,6 +346,215 @@ memoryCmd
     console.log(`  ${t.success(icons.check)} Pruned:    ${result.pruned}\n`);
   });
 
+// ── weave test ─────────────────────────────────────────────
+const testCmd = program.command("test").description("Testing-focused multi-agent workflow");
+
+testCmd
+  .command("init")
+  .description("Create default testing agents")
+  .option("-w, --workspace <name>", "Workspace to use", "default")
+  .action(async (options) => {
+    const config = loadConfig();
+    const workspacePath = getWorkspacePath(options.workspace);
+
+    const { MemoryFabric } = await import("./core/fabric.js");
+    const fabric = await MemoryFabric.create({ ...config, workspacePath });
+
+    const defaults = [
+      {
+        id: "test-orchestrator",
+        name: "test-orchestrator",
+        role: "QA Orchestrator",
+        description: "Coordinates multi-step test execution and prioritizes fixes by risk.",
+      },
+      {
+        id: "edge-case-hunter",
+        name: "edge-case-hunter",
+        role: "Edge Case Hunter",
+        description: "Finds negative, boundary, race-condition, and regression edge cases.",
+      },
+      {
+        id: "report-analyst",
+        name: "report-analyst",
+        role: "Test Report Analyst",
+        description: "Turns noisy test output into actionable summaries and next steps.",
+      },
+    ];
+
+    for (const persona of defaults) {
+      fabric.getOrCreateAgent(persona.id, persona);
+    }
+    fabric.save();
+    fabric.close();
+    console.log(successLine("Testing agents initialized."));
+  });
+
+testCmd
+  .command("plan")
+  .description("Show discovered and autonomous testing plan without executing")
+  .option("-d, --dir <path>", "Target project directory", process.cwd())
+  .option("-m, --model <model>", "Model to use for autonomous planning")
+  .option("-p, --provider <provider>", "LLM provider (openai|anthropic|ollama|lmstudio)")
+  .option("--max-auto <n>", "Maximum autonomous test commands to add (0 disables)", "0")
+  .option("--no-autonomous", "Disable autonomous test expansion")
+  .action(async (options) => {
+    const config = loadConfig();
+    const providerName = options.provider || config.provider;
+    const model = options.model || config.model;
+    const apiKey = resolveApiKey({ ...config, provider: providerName });
+    const isLocal = providerName === "ollama" || providerName === "lmstudio";
+    const targetDir = String(options.dir);
+    const maxAutonomous = Math.max(0, parseInt(String(options.maxAuto), 10) || 0);
+    const autonomousEnabled = Boolean(options.autonomous);
+
+    const { discoverTestingPlan } = await import("./testing/discovery.js");
+    const { generateAutonomousPlan, toAutonomousCommands } = await import("./testing/autonomous.js");
+    const { createProvider } = await import("./llm/provider.js");
+    const plan = discoverTestingPlan(targetDir);
+
+    if (plan.commands.length === 0) {
+      console.log(errorLine("No test commands discovered for this project."));
+      process.exit(1);
+    }
+
+    const llm = apiKey || isLocal
+      ? createProvider(providerName, apiKey || "ollama", model, config.baseURL)
+      : null;
+    const autonomousItems =
+      autonomousEnabled && maxAutonomous > 0
+        ? await generateAutonomousPlan(llm, model, plan, maxAutonomous)
+        : [];
+    const autonomousCommands = toAutonomousCommands(autonomousItems, plan.commands);
+
+    console.log(`\n  ${t.brandBold("Testing plan")}`);
+    console.log(`  ${t.muted("─".repeat(50))}`);
+    for (const cmd of plan.commands) {
+      console.log(`  ${t.muted(icons.arrow)} ${cmd.label} ${t.dim(`(${cmd.command})`)}`);
+    }
+    if (autonomousCommands.length > 0) {
+      console.log(`  ${t.brandBold("Autonomous additions")}`);
+      for (const cmd of autonomousCommands) {
+        console.log(`  ${t.muted(icons.arrow)} ${cmd.label} ${t.dim(`(${cmd.command})`)}`);
+      }
+    }
+    console.log("");
+  });
+
+testCmd
+  .command("run")
+  .description("Run discovered + autonomous tests, analyze results, and persist findings")
+  .option("-w, --workspace <name>", "Workspace to use", "default")
+  .option("-d, --dir <path>", "Target project directory", process.cwd())
+  .option("-m, --model <model>", "Model to use for testing insights")
+  .option("-p, --provider <provider>", "LLM provider (openai|anthropic|ollama|lmstudio)")
+  .option("-t, --timeout <ms>", "Per-command timeout in milliseconds", "120000")
+  .option("--max-auto <n>", "Maximum autonomous test commands to add (0 disables)", "0")
+  .option("--no-autonomous", "Disable autonomous test expansion")
+  .action(async (options) => {
+    const config = loadConfig();
+    const providerName = options.provider || config.provider;
+    const model = options.model || config.model;
+    const apiKey = resolveApiKey({ ...config, provider: providerName });
+    const isLocal = providerName === "ollama" || providerName === "lmstudio";
+    const workspacePath = getWorkspacePath(options.workspace);
+
+    const { MemoryFabric } = await import("./core/fabric.js");
+    const { discoverTestingPlan } = await import("./testing/discovery.js");
+    const { runTestingCommands } = await import("./testing/runner.js");
+    const {
+      generateAutonomousPlan,
+      toAutonomousCommands,
+      persistAutonomousPlan,
+    } = await import("./testing/autonomous.js");
+    const {
+      buildTestingInsights,
+      makeTestingReport,
+      persistRunToMemory,
+    } = await import("./testing/orchestrator.js");
+    const { renderTestingReport } = await import("./testing/report.js");
+    const { createProvider } = await import("./llm/provider.js");
+
+    const fabric = await MemoryFabric.create({
+      ...config,
+      provider: providerName,
+      model,
+      apiKey,
+      workspacePath,
+    });
+
+    const orchestrator = fabric.getOrCreateAgent("test-orchestrator", {
+      name: "test-orchestrator",
+      role: "QA Orchestrator",
+      description: "Coordinates multi-step test execution and prioritizes fixes by risk.",
+      model,
+      provider: providerName,
+    });
+    const edgeHunter = fabric.getOrCreateAgent("edge-case-hunter", {
+      name: "edge-case-hunter",
+      role: "Edge Case Hunter",
+      description: "Finds negative, boundary, race-condition, and regression edge cases.",
+      model,
+      provider: providerName,
+    });
+    const reporter = fabric.getOrCreateAgent("report-analyst", {
+      name: "report-analyst",
+      role: "Test Report Analyst",
+      description: "Turns noisy test output into actionable summaries and next steps.",
+      model,
+      provider: providerName,
+    });
+
+    const targetDir = String(options.dir);
+    const timeoutMs = parseInt(String(options.timeout), 10);
+    const maxAutonomous = Math.max(0, parseInt(String(options.maxAuto), 10) || 0);
+    const autonomousEnabled = Boolean(options.autonomous);
+    const plan = discoverTestingPlan(targetDir);
+
+    if (plan.commands.length === 0) {
+      console.log(errorLine("No test commands discovered for this project."));
+      console.log(`  ${t.dim("Use scripts like test/lint/typecheck/build in package.json, then rerun.")}`);
+      fabric.close();
+      process.exit(1);
+    }
+
+    console.log(`\n  ${t.brandBold("Running testing pipeline")}`);
+    console.log(`  ${t.muted("─".repeat(40))}`);
+    for (const cmd of plan.commands) {
+      console.log(`  ${t.muted(icons.arrow)} ${cmd.label} ${t.dim(`(${cmd.command})`)}`);
+    }
+    const llm = apiKey || isLocal
+      ? createProvider(providerName, apiKey || "ollama", model, config.baseURL)
+      : null;
+
+    const autonomousItems =
+      autonomousEnabled && maxAutonomous > 0
+        ? await generateAutonomousPlan(llm, model, plan, maxAutonomous)
+        : [];
+    const autonomousCommands = toAutonomousCommands(autonomousItems, plan.commands);
+    if (autonomousCommands.length > 0) {
+      console.log(`  ${t.brandBold("Autonomous expansions")}`);
+      for (const cmd of autonomousCommands) {
+        console.log(`  ${t.muted(icons.arrow)} ${cmd.label} ${t.dim(`(${cmd.command})`)}`);
+      }
+      await persistAutonomousPlan(orchestrator, edgeHunter, autonomousItems);
+    }
+    console.log("");
+
+    const results = runTestingCommands(
+      [...plan.commands, ...autonomousCommands],
+      targetDir,
+      timeoutMs
+    );
+    const insights = await buildTestingInsights(llm, model, plan, results);
+    const report = makeTestingReport(targetDir, plan, results, insights);
+
+    await persistRunToMemory(orchestrator, edgeHunter, reporter, report);
+    fabric.save();
+    fabric.close();
+
+    console.log(renderTestingReport(report));
+  });
+
 // ── weave config ───────────────────────────────────────────
 const configCmd = program.command("config").description("Manage configuration");
 
@@ -512,20 +721,20 @@ program
 // ── weave init ─────────────────────────────────────────────
 program
   .command("init")
-  .description("Initialize weave in the current directory")
+  .description("Initialize weave-test in the current directory")
   .action(() => {
     ensureConfigDir();
     console.log(banner(VERSION));
     console.log(successLine("Weave initialized!"));
     console.log(`\n  ${t.dim("Get started:")}`);
     console.log(
-      `  ${t.accent("weave config set apiKey")} ${t.dim("<your-api-key>")}  ${t.muted("# set your API key")}`
+      `  ${t.accent("weave-test config set apiKey")} ${t.dim("<your-api-key>")}  ${t.muted("# set your API key")}`
     );
     console.log(
-      `  ${t.accent("weave chat")}                              ${t.muted("# start chatting")}`
+      `  ${t.accent("weave-test test init")}                    ${t.muted("# bootstrap testing agents")}`
     );
     console.log(
-      `  ${t.accent("weave agent spawn researcher")}            ${t.muted("# create agents")}`
+      `  ${t.accent("weave-test test run")}                     ${t.muted("# run testing workflow")}`
     );
     console.log("");
   });
