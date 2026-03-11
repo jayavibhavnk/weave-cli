@@ -6,7 +6,7 @@ import type { LLMProvider } from "../llm/provider.js";
 import type { TranscriptItem } from "./app.js";
 import { generateId, MemoryType, MemoryTier } from "../core/types.js";
 import { createProvider } from "../llm/provider.js";
-import { resolveApiKey, loadConfig } from "../config.js";
+import { resolveApiKey, loadConfig, getProviderBaseURL } from "../config.js";
 
 export interface CommandContext {
   fabric: MemoryFabric;
@@ -160,7 +160,7 @@ export const commands: SlashCommand[] = [
       if (!modelName) {
         ctx.pushItem({
           id: generateId(), type: "system",
-          content: "Usage: /model <model-name>\nExamples: gpt-4o, gpt-4o-mini, claude-sonnet-4-20250514, claude-opus-4-20250514",
+          content: "Usage: /model <model-name>\nExamples: gpt-4o, claude-sonnet-4-20250514, llama3.2 (ollama), local-model (lmstudio)",
         });
         return;
       }
@@ -169,14 +169,18 @@ export const commands: SlashCommand[] = [
       let providerName = config.provider;
       if (modelName.startsWith("claude")) providerName = "anthropic";
       else if (modelName.startsWith("gpt") || modelName.startsWith("o1") || modelName.startsWith("o3")) providerName = "openai";
+      else if (providerName !== "ollama" && providerName !== "lmstudio") {
+        // Keep current provider when not a known cloud model
+      }
 
       const apiKey = resolveApiKey({ ...config, provider: providerName });
-      if (!apiKey) {
+      if (!apiKey && providerName !== "ollama" && providerName !== "lmstudio") {
         ctx.pushItem({ id: generateId(), type: "error", content: `No API key for ${providerName}. Run: weave config set apiKey <key>` });
         return;
       }
 
-      const newProvider = createProvider(providerName, apiKey, modelName);
+      const baseURL = getProviderBaseURL(providerName, config.baseURL);
+      const newProvider = createProvider(providerName, apiKey || "ollama", modelName, baseURL);
       ctx.setProvider(newProvider);
       ctx.setModel(modelName);
       ctx.pushItem({ id: generateId(), type: "system", content: `Switched to ${modelName} (${providerName})` });

@@ -171,10 +171,13 @@ export class AgentMemory {
     const p = this.persona;
     const parts: string[] = [];
 
+    // Identity (Cursor-style: one clear line)
     if (p.systemPrompt) {
       parts.push(p.systemPrompt);
     } else {
-      parts.push(`You are ${p.name}, ${p.role}.`);
+      parts.push(
+        `You are ${p.name}, ${p.role}. You have access to persistent graph memory and tools for files and shell.`
+      );
       if (p.description) parts.push(p.description);
     }
 
@@ -197,12 +200,10 @@ export class AgentMemory {
     parts.push("");
     parts.push(
       "## Guidelines\n" +
-        "- You have persistent memory. Important information is automatically saved between sessions.\n" +
-        "- Reference your memories naturally when relevant.\n" +
-        "- You have access to tools for reading/writing files, running commands, and searching code.\n" +
-        "- Use tools when the user asks you to examine, edit, or create files.\n" +
-        "- Be concise and helpful.\n" +
-        "- If unsure, say so."
+        "- You have persistent memory. Important information is automatically saved between sessions. Reference recalled context when relevant; don't repeat stored facts—build on them.\n" +
+        "- **Tools**: Use tools when the user asks you to examine, edit, or run something. Prefer `read_file` before `edit_file` or `write_file`. For large files use `start_line`/`end_line`. Paths are relative to the current working directory.\n" +
+        "- **Formatting**: Use backticks for file names, commands, and symbol names. When citing code, use the form `path:startLine-endLine` (e.g. `src/app.ts:12-15`).\n" +
+        "- Be concise and helpful. If unsure, say so."
     );
 
     return parts.join("\n");

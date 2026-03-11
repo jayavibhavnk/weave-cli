@@ -51,6 +51,16 @@ weave config set provider anthropic
 weave config set apiKey sk-ant-your-key
 weave config set model claude-sonnet-4-20250514
 weave chat
+
+# Or use Ollama (local, no API key required)
+weave config set provider ollama
+weave config set model llama3.2
+weave chat
+
+# Or use LM Studio (local; start a model in LM Studio first)
+weave config set provider lmstudio
+weave config set model local-model
+weave chat
 ```
 
 ## Commands
@@ -62,6 +72,8 @@ weave chat                          # interactive chat with memory
 weave chat --agent researcher       # chat as specific agent
 weave chat --model gpt-4o-mini      # use a different model
 weave chat --provider anthropic     # use Anthropic
+weave chat --provider ollama        # use Ollama (local)
+weave chat --provider lmstudio      # use LM Studio (local)
 ```
 
 In-chat slash commands:
@@ -103,8 +115,9 @@ weave memory consolidate               # promote, merge, decay, prune
 
 ```bash
 weave config set apiKey sk-...
-weave config set provider openai       # or anthropic
+weave config set provider openai       # or anthropic, ollama, lmstudio
 weave config set model gpt-4o
+weave config set baseURL http://localhost:11434/v1  # for ollama/lmstudio (optional)
 weave config set embeddingBackend local # or openai
 weave config list
 weave config get provider

@@ -82,9 +82,15 @@ export class OpenAIProvider implements LLMProvider {
 
     if (msg?.tool_calls) {
       for (const tc of msg.tool_calls) {
+        const fn = tc.function;
+        if (!fn?.name) continue;
         let args: Record<string, unknown> = {};
-        try { args = JSON.parse(tc.function.arguments || "{}"); } catch {}
-        toolCalls.push({ id: tc.id, name: tc.function.name, args });
+        try {
+          args = JSON.parse(fn.arguments || "{}");
+        } catch {
+          /* ignore */
+        }
+        toolCalls.push({ id: tc.id ?? `call_${Date.now()}`, name: fn.name, args });
       }
     }
 
@@ -111,6 +117,117 @@ export class OpenAIProvider implements LLMProvider {
       toolCallId: r.callId,
     }));
 
+    return [assistantMsg, ...resultMsgs];
+  }
+}
+
+// ── OpenAI-compatible (Ollama, LM Studio) ────────────────
+
+const OLLAMA_DEFAULT_BASE = "http://localhost:11434/v1";
+const LMSTUDIO_DEFAULT_BASE = "http://localhost:1234/v1";
+
+export class OpenAICompatibleProvider implements LLMProvider {
+  readonly name: string;
+  private baseURL: string;
+  private apiKey: string;
+  private defaultModel: string;
+
+  constructor(
+    name: string,
+    baseURL: string,
+    apiKey: string,
+    model: string
+  ) {
+    this.name = name;
+    this.baseURL = baseURL.replace(/\/$/, "");
+    if (!this.baseURL.endsWith("/v1")) this.baseURL += "/v1";
+    this.apiKey = apiKey || "ollama";
+    this.defaultModel = model;
+  }
+
+  private getClient(): Promise<import("openai").OpenAI> {
+    return import("openai").then(({ default: OpenAI }) => {
+      return new OpenAI({
+        baseURL: this.baseURL,
+        apiKey: this.apiKey,
+      });
+    });
+  }
+
+  async chat(messages: ChatMessage[], model?: string): Promise<string> {
+    const client = await this.getClient();
+    const resp = await client.chat.completions.create({
+      model: model || this.defaultModel,
+      messages: messages.map(toOpenAIMsg),
+    });
+    return resp.choices[0]?.message?.content || "";
+  }
+
+  async *stream(messages: ChatMessage[], model?: string): AsyncIterable<string> {
+    const client = await this.getClient();
+    const stream = await client.chat.completions.create({
+      model: model || this.defaultModel,
+      messages: messages.map(toOpenAIMsg),
+      stream: true,
+    });
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content;
+      if (delta) yield delta;
+    }
+  }
+
+  async chatWithTools(
+    messages: ChatMessage[],
+    tools: ToolDef[],
+    model?: string
+  ): Promise<AgentResponse> {
+    const client = await this.getClient();
+    const resp = await client.chat.completions.create({
+      model: model || this.defaultModel,
+      messages: messages.map(toOpenAIMsg),
+      tools: toOpenAITools(tools) as any,
+    });
+
+    const msg = resp.choices[0]?.message;
+    const toolCalls: ToolCall[] = [];
+
+    if (msg?.tool_calls) {
+      for (const tc of msg.tool_calls) {
+        let args: Record<string, unknown> = {};
+        try {
+          args = JSON.parse(tc.function?.arguments || "{}");
+        } catch {
+          /* ignore */
+        }
+        toolCalls.push({
+          id: tc.id || `call_${Date.now()}_${toolCalls.length}`,
+          name: tc.function?.name || "unknown",
+          args,
+        });
+      }
+    }
+
+    return { text: msg?.content || "", toolCalls };
+  }
+
+  buildToolResultMessages(
+    toolCalls: ToolCall[],
+    results: { callId: string; output: string }[]
+  ): ChatMessage[] {
+    const assistantMsg: ChatMessage = {
+      role: "assistant",
+      content: "",
+      toolCalls: toolCalls.map((tc) => ({
+        id: tc.id,
+        name: tc.name,
+        args: tc.args,
+      })),
+    };
+    const resultMsgs: ChatMessage[] = results.map((r) => ({
+      role: "tool" as const,
+      content: r.output,
+      toolCallId: r.callId,
+    }));
     return [assistantMsg, ...resultMsgs];
   }
 }
@@ -273,11 +390,33 @@ function splitSystemAnthropic(messages: ChatMessage[]): {
   return { system: sys?.content || "", msgs };
 }
 
+export type ProviderName = import("../core/types.js").LLMProviderName;
+
 export function createProvider(
-  provider: "openai" | "anthropic",
+  provider: ProviderName,
   apiKey: string,
-  model?: string
+  model?: string,
+  baseURL?: string
 ): LLMProvider {
-  if (provider === "anthropic") return new AnthropicProvider(apiKey, model);
+  const p = String(provider).toLowerCase() as ProviderName;
+  if (p === "anthropic") {
+    return new AnthropicProvider(apiKey, model);
+  }
+  if (p === "ollama") {
+    return new OpenAICompatibleProvider(
+      "ollama",
+      baseURL || OLLAMA_DEFAULT_BASE,
+      apiKey,
+      model || "llama3.2"
+    );
+  }
+  if (p === "lmstudio") {
+    return new OpenAICompatibleProvider(
+      "lmstudio",
+      baseURL || LMSTUDIO_DEFAULT_BASE,
+      apiKey,
+      model || "local-model"
+    );
+  }
   return new OpenAIProvider(apiKey, model);
 }

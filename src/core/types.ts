@@ -81,9 +81,12 @@ export interface ConsolidationResult {
   pruned: number;
 }
 
+export type LLMProviderName = "openai" | "anthropic" | "ollama" | "lmstudio";
+
 export interface WeaveConfig {
-  provider: "openai" | "anthropic";
+  provider: LLMProviderName;
   apiKey?: string;
+  baseURL?: string;
   model: string;
   embeddingModel: string;
   embeddingBackend: "local" | "openai";

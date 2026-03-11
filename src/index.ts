@@ -27,15 +27,16 @@ program
   .description("Start an interactive chat session with persistent memory")
   .option("-a, --agent <name>", "Agent to chat with", "assistant")
   .option("-m, --model <model>", "Model to use")
-  .option("-p, --provider <provider>", "LLM provider (openai|anthropic)")
+  .option("-p, --provider <provider>", "LLM provider (openai|anthropic|ollama|lmstudio)")
   .option("-w, --workspace <name>", "Workspace to use", "default")
   .action(async (options) => {
     const config = loadConfig();
     const provider = options.provider || config.provider;
     const model = options.model || config.model;
     const apiKey = resolveApiKey({ ...config, provider });
+    const isLocal = provider === "ollama" || provider === "lmstudio";
 
-    if (!apiKey) {
+    if (!apiKey && !isLocal) {
       console.log("");
       console.log(errorLine("No API key found. Set one with:"));
       console.log(
@@ -67,7 +68,8 @@ program
       provider,
     });
 
-    const llm = createProvider(provider, apiKey, model);
+    const baseURL = isLocal && config.baseURL ? config.baseURL : undefined;
+    const llm = createProvider(provider, apiKey!, model, baseURL);
 
     const React = await import("react");
     const { render } = await import("ink");
@@ -348,8 +350,13 @@ configCmd
   .command("set <key> <value>")
   .description("Set a config value")
   .action((key, value) => {
-    setConfigValue(key, value);
-    console.log(successLine(`${key} = ${t.accent(value)}`));
+    try {
+      setConfigValue(key, value);
+      console.log(successLine(`${key} = ${t.accent(value)}`));
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
   });
 
 configCmd
@@ -455,10 +462,15 @@ program
 
     const config = loadConfig();
     const apiKey = resolveApiKey(config);
+    const isLocal = config.provider === "ollama" || config.provider === "lmstudio";
+    const apiKeyOk = isLocal || apiKey;
     console.log(
-      `  ${apiKey ? t.success(icons.check) : t.error(icons.cross)} API Key: ${apiKey ? t.success("configured") : t.error("missing")}`
+      `  ${apiKeyOk ? t.success(icons.check) : t.error(icons.cross)} API Key: ${isLocal ? t.success("not required (local)") : apiKey ? t.success("configured") : t.error("missing")}`
     );
     console.log(`  ${t.success(icons.check)} Provider: ${config.provider}`);
+    if (isLocal && config.baseURL) {
+      console.log(`  ${t.success(icons.check)} Base URL: ${config.baseURL}`);
+    }
     console.log(`  ${t.success(icons.check)} Model: ${config.model}`);
     console.log(
       `  ${t.success(icons.check)} Embedding: ${config.embeddingBackend} (${config.embeddingDim}d)`

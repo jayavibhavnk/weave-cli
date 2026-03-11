@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import type { WeaveConfig } from "./core/types.js";
+import type { WeaveConfig, LLMProviderName } from "./core/types.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".weave");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
@@ -76,11 +76,21 @@ export function getConfigValue(key: string): unknown {
   return (config as unknown as Record<string, unknown>)[key];
 }
 
+const VALID_PROVIDERS: LLMProviderName[] = ["openai", "anthropic", "ollama", "lmstudio"];
+
 export function setConfigValue(key: string, value: string): void {
   const update: Record<string, unknown> = {};
 
   if (key === "embeddingDim") {
-    update[key] = parseInt(value, 10);
+    const n = parseInt(value, 10);
+    if (Number.isNaN(n)) throw new Error("embeddingDim must be a number");
+    update[key] = n;
+  } else if (key === "provider") {
+    const p = value.toLowerCase();
+    if (!VALID_PROVIDERS.includes(p as LLMProviderName)) {
+      throw new Error(`Invalid provider: ${value}. Use one of: ${VALID_PROVIDERS.join(", ")}`);
+    }
+    update[key] = p;
   } else {
     update[key] = value;
   }
@@ -106,7 +116,21 @@ export function listWorkspaces(): string[] {
 }
 
 export function resolveApiKey(config: WeaveConfig): string | undefined {
+  if (config.provider === "ollama" || config.provider === "lmstudio") {
+    return config.apiKey ?? "ollama";
+  }
   if (config.apiKey) return config.apiKey;
   if (config.provider === "anthropic") return process.env.ANTHROPIC_API_KEY;
   return process.env.OPENAI_API_KEY;
+}
+
+export function getProviderBaseURL(
+  provider: LLMProviderName,
+  baseURL?: string
+): string | undefined {
+  if (provider !== "ollama" && provider !== "lmstudio") return undefined;
+  if (baseURL) return baseURL;
+  return provider === "ollama"
+    ? "http://localhost:11434/v1"
+    : "http://localhost:1234/v1";
 }
