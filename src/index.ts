@@ -398,46 +398,36 @@ testCmd
   .option("--max-auto <n>", "Maximum autonomous test commands to add (0 disables)", "0")
   .option("--no-autonomous", "Disable autonomous test expansion")
   .action(async (options) => {
-    const config = loadConfig();
-    const providerName = options.provider || config.provider;
-    const model = options.model || config.model;
-    const apiKey = resolveApiKey({ ...config, provider: providerName });
-    const isLocal = providerName === "ollama" || providerName === "lmstudio";
-    const targetDir = String(options.dir);
-    const maxAutonomous = Math.max(0, parseInt(String(options.maxAuto), 10) || 0);
-    const autonomousEnabled = Boolean(options.autonomous);
+    try {
+      const { planTestWorkflow } = await import("./testing/run-workflow.js");
+      const targetDir = String(options.dir);
+      const maxAutonomous = Math.max(0, parseInt(String(options.maxAuto), 10) || 0);
+      const autonomousEnabled = Boolean(options.autonomous);
+      const plan = await planTestWorkflow({
+        workspace: "default",
+        dir: targetDir,
+        model: options.model,
+        provider: options.provider,
+        maxAuto: maxAutonomous,
+        autonomous: autonomousEnabled,
+      });
 
-    const { discoverTestingPlan } = await import("./testing/discovery.js");
-    const { generateAutonomousPlan, toAutonomousCommands } = await import("./testing/autonomous.js");
-    const { createProvider } = await import("./llm/provider.js");
-    const plan = discoverTestingPlan(targetDir);
-
-    if (plan.commands.length === 0) {
-      console.log(errorLine("No test commands discovered for this project."));
-      process.exit(1);
-    }
-
-    const llm = apiKey || isLocal
-      ? createProvider(providerName, apiKey || "ollama", model, config.baseURL)
-      : null;
-    const autonomousItems =
-      autonomousEnabled && maxAutonomous > 0
-        ? await generateAutonomousPlan(llm, model, plan, maxAutonomous)
-        : [];
-    const autonomousCommands = toAutonomousCommands(autonomousItems, plan.commands);
-
-    console.log(`\n  ${t.brandBold("Testing plan")}`);
-    console.log(`  ${t.muted("─".repeat(50))}`);
-    for (const cmd of plan.commands) {
-      console.log(`  ${t.muted(icons.arrow)} ${cmd.label} ${t.dim(`(${cmd.command})`)}`);
-    }
-    if (autonomousCommands.length > 0) {
-      console.log(`  ${t.brandBold("Autonomous additions")}`);
-      for (const cmd of autonomousCommands) {
+      console.log(`\n  ${t.brandBold("Testing plan")}`);
+      console.log(`  ${t.muted("─".repeat(50))}`);
+      for (const cmd of plan.discoveredCommands) {
         console.log(`  ${t.muted(icons.arrow)} ${cmd.label} ${t.dim(`(${cmd.command})`)}`);
       }
+      if (plan.autonomousCommands.length > 0) {
+        console.log(`  ${t.brandBold("Autonomous additions")}`);
+        for (const cmd of plan.autonomousCommands) {
+          console.log(`  ${t.muted(icons.arrow)} ${cmd.label} ${t.dim(`(${cmd.command})`)}`);
+        }
+      }
+      console.log("");
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
     }
-    console.log("");
   });
 
 testCmd
@@ -451,108 +441,356 @@ testCmd
   .option("--max-auto <n>", "Maximum autonomous test commands to add (0 disables)", "0")
   .option("--no-autonomous", "Disable autonomous test expansion")
   .action(async (options) => {
-    const config = loadConfig();
-    const providerName = options.provider || config.provider;
-    const model = options.model || config.model;
-    const apiKey = resolveApiKey({ ...config, provider: providerName });
-    const isLocal = providerName === "ollama" || providerName === "lmstudio";
-    const workspacePath = getWorkspacePath(options.workspace);
+    try {
+      const { executeTestWorkflow } = await import("./testing/run-workflow.js");
+      const targetDir = String(options.dir);
+      const timeoutMs = parseInt(String(options.timeout), 10);
+      const maxAutonomous = Math.max(0, parseInt(String(options.maxAuto), 10) || 0);
+      const autonomousEnabled = Boolean(options.autonomous);
 
-    const { MemoryFabric } = await import("./core/fabric.js");
-    const { discoverTestingPlan } = await import("./testing/discovery.js");
-    const { runTestingCommands } = await import("./testing/runner.js");
-    const {
-      generateAutonomousPlan,
-      toAutonomousCommands,
-      persistAutonomousPlan,
-    } = await import("./testing/autonomous.js");
-    const {
-      buildTestingInsights,
-      makeTestingReport,
-      persistRunToMemory,
-    } = await import("./testing/orchestrator.js");
-    const { renderTestingReport } = await import("./testing/report.js");
-    const { createProvider } = await import("./llm/provider.js");
+      const result = await executeTestWorkflow({
+        workspace: options.workspace,
+        dir: targetDir,
+        model: options.model,
+        provider: options.provider,
+        timeoutMs,
+        maxAuto: maxAutonomous,
+        autonomous: autonomousEnabled,
+      });
 
-    const fabric = await MemoryFabric.create({
-      ...config,
-      provider: providerName,
-      model,
-      apiKey,
-      workspacePath,
-    });
-
-    const orchestrator = fabric.getOrCreateAgent("test-orchestrator", {
-      name: "test-orchestrator",
-      role: "QA Orchestrator",
-      description: "Coordinates multi-step test execution and prioritizes fixes by risk.",
-      model,
-      provider: providerName,
-    });
-    const edgeHunter = fabric.getOrCreateAgent("edge-case-hunter", {
-      name: "edge-case-hunter",
-      role: "Edge Case Hunter",
-      description: "Finds negative, boundary, race-condition, and regression edge cases.",
-      model,
-      provider: providerName,
-    });
-    const reporter = fabric.getOrCreateAgent("report-analyst", {
-      name: "report-analyst",
-      role: "Test Report Analyst",
-      description: "Turns noisy test output into actionable summaries and next steps.",
-      model,
-      provider: providerName,
-    });
-
-    const targetDir = String(options.dir);
-    const timeoutMs = parseInt(String(options.timeout), 10);
-    const maxAutonomous = Math.max(0, parseInt(String(options.maxAuto), 10) || 0);
-    const autonomousEnabled = Boolean(options.autonomous);
-    const plan = discoverTestingPlan(targetDir);
-
-    if (plan.commands.length === 0) {
-      console.log(errorLine("No test commands discovered for this project."));
-      console.log(`  ${t.dim("Use scripts like test/lint/typecheck/build in package.json, then rerun.")}`);
-      fabric.close();
-      process.exit(1);
-    }
-
-    console.log(`\n  ${t.brandBold("Running testing pipeline")}`);
-    console.log(`  ${t.muted("─".repeat(40))}`);
-    for (const cmd of plan.commands) {
-      console.log(`  ${t.muted(icons.arrow)} ${cmd.label} ${t.dim(`(${cmd.command})`)}`);
-    }
-    const llm = apiKey || isLocal
-      ? createProvider(providerName, apiKey || "ollama", model, config.baseURL)
-      : null;
-
-    const autonomousItems =
-      autonomousEnabled && maxAutonomous > 0
-        ? await generateAutonomousPlan(llm, model, plan, maxAutonomous)
-        : [];
-    const autonomousCommands = toAutonomousCommands(autonomousItems, plan.commands);
-    if (autonomousCommands.length > 0) {
-      console.log(`  ${t.brandBold("Autonomous expansions")}`);
-      for (const cmd of autonomousCommands) {
+      console.log(`\n  ${t.brandBold("Running testing pipeline")}`);
+      console.log(`  ${t.muted("─".repeat(40))}`);
+      for (const cmd of result.discoveredCommands) {
         console.log(`  ${t.muted(icons.arrow)} ${cmd.label} ${t.dim(`(${cmd.command})`)}`);
       }
-      await persistAutonomousPlan(orchestrator, edgeHunter, autonomousItems);
+      if (result.autonomousCommands.length > 0) {
+        console.log(`  ${t.brandBold("Autonomous expansions")}`);
+        for (const cmd of result.autonomousCommands) {
+          console.log(`  ${t.muted(icons.arrow)} ${cmd.label} ${t.dim(`(${cmd.command})`)}`);
+        }
+      }
+      console.log("");
+      console.log(result.renderedReport);
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
     }
+  });
+
+// ── weave-test automation ─────────────────────────────────
+const automationCmd = program
+  .command("automation")
+  .description("Durable automations for recurring testing workflows");
+
+automationCmd
+  .command("create")
+  .description("Create a durable automation")
+  .requiredOption("-n, --name <name>", "Automation name")
+  .requiredOption("-d, --dir <path>", "Target project directory")
+  .option("-w, --workspace <name>", "Workspace to store and run in", "default")
+  .option("--target <type>", "Automation target (testRun|testPlan)", "testRun")
+  .option("--every <interval>", "Recurring interval like 15m, 2h, or 1d")
+  .option("--cron <expr>", "5-field cron expression")
+  .option("--at <time>", "One-shot reminder time like `in 45 minutes` or an ISO date")
+  .option("-t, --timeout <ms>", "Per-command timeout in milliseconds", "120000")
+  .option("--max-auto <n>", "Maximum autonomous test commands to add", "0")
+  .option("--no-autonomous", "Disable autonomous expansion")
+  .option("--max-failures <n>", "Auto-pause after this many consecutive failures", "3")
+  .option("-m, --model <model>", "Model to use")
+  .option("-p, --provider <provider>", "Provider to use")
+  .action(async (options) => {
+    try {
+      const { AutomationStore } = await import("./testing/automation-store.js");
+      const {
+        buildAutomationTarget,
+        buildAutomationTrigger,
+        renderAutomationCreated,
+      } = await import("./testing/automation-cli.js");
+      const store = await AutomationStore.create(options.workspace);
+      const trigger = buildAutomationTrigger({
+        every: options.every,
+        cron: options.cron,
+        at: options.at,
+      });
+      const target = buildAutomationTarget({
+        target: options.target,
+        dir: options.dir,
+        workspace: options.workspace,
+        timeout: options.timeout,
+        maxAuto: options.maxAuto,
+        autonomous: options.autonomous,
+        provider: options.provider,
+        model: options.model,
+      });
+      const record = store.create({
+        name: options.name,
+        trigger,
+        target,
+        maxFailures: Math.max(1, parseInt(String(options.maxFailures), 10) || 3),
+      });
+      console.log(renderAutomationCreated(record));
+      store.close();
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+automationCmd
+  .command("list")
+  .description("List automations")
+  .option("-w, --workspace <name>", "Workspace to inspect", "default")
+  .action(async (options) => {
+    const { AutomationStore } = await import("./testing/automation-store.js");
+    const { renderAutomationTable } = await import("./testing/automation-cli.js");
+    const store = await AutomationStore.create(options.workspace);
+    const records = store.list();
+    if (records.length === 0) {
+      console.log(`\n  ${t.dim("No automations yet. Create one with:")} ${t.accent("weave-test automation create")}\n`);
+    } else {
+      console.log("");
+      console.log(renderAutomationTable(records));
+      console.log("");
+    }
+    store.close();
+  });
+
+automationCmd
+  .command("delete <id>")
+  .description("Delete an automation")
+  .option("-w, --workspace <name>", "Workspace to modify", "default")
+  .action(async (id, options) => {
+    const { AutomationStore } = await import("./testing/automation-store.js");
+    const store = await AutomationStore.create(options.workspace);
+    const record = store.get(id);
+    if (!record) {
+      console.log(errorLine(`Automation "${id}" not found.`));
+      store.close();
+      process.exit(1);
+    }
+    store.delete(id);
+    store.close();
+    console.log(successLine(`Automation "${id}" deleted.`));
+  });
+
+automationCmd
+  .command("pause <id>")
+  .description("Pause an automation")
+  .option("-w, --workspace <name>", "Workspace to modify", "default")
+  .action(async (id, options) => {
+    const { AutomationStore } = await import("./testing/automation-store.js");
+    const store = await AutomationStore.create(options.workspace);
+    const updated = store.setEnabled(id, false);
+    store.close();
+    if (!updated) {
+      console.log(errorLine(`Automation "${id}" not found.`));
+      process.exit(1);
+    }
+    console.log(successLine(`Automation "${id}" paused.`));
+  });
+
+automationCmd
+  .command("resume <id>")
+  .description("Resume an automation")
+  .option("-w, --workspace <name>", "Workspace to modify", "default")
+  .action(async (id, options) => {
+    const { AutomationStore } = await import("./testing/automation-store.js");
+    const { computeNextRunAt } = await import("./testing/automation-store.js");
+    const store = await AutomationStore.create(options.workspace);
+    const record = store.get(id);
+    if (!record) {
+      store.close();
+      console.log(errorLine(`Automation "${id}" not found.`));
+      process.exit(1);
+    }
+    record.enabled = true;
+    record.failureCount = 0;
+    record.nextRunAt = record.nextRunAt ?? computeNextRunAt(record.trigger);
+    store.save(record);
+    store.close();
+    console.log(successLine(`Automation "${id}" resumed.`));
+  });
+
+automationCmd
+  .command("run <id>")
+  .description("Run an automation immediately")
+  .option("-w, --workspace <name>", "Workspace to load from", "default")
+  .action(async (id, options) => {
+    try {
+      const { AutomationStore } = await import("./testing/automation-store.js");
+      const { executeTestWorkflow, planTestWorkflow } = await import("./testing/run-workflow.js");
+      const store = await AutomationStore.create(options.workspace);
+      const record = store.get(id);
+      if (!record) {
+        store.close();
+        console.log(errorLine(`Automation "${id}" not found.`));
+        process.exit(1);
+      }
+
+      const runId = `${record.id}-manual-${Date.now()}`;
+      const startedAt = Date.now();
+      store.appendRun({
+        id: runId,
+        automationId: record.id,
+        startedAt,
+        status: "running",
+        summary: "Manual automation run started.",
+      });
+
+      if (record.target.type === "testPlan") {
+        const planned = await planTestWorkflow({
+          workspace: record.target.workspace,
+          dir: record.target.dir,
+          model: record.target.model,
+          provider: record.target.provider,
+          timeoutMs: record.target.timeoutMs,
+          maxAuto: record.target.maxAuto,
+          autonomous: record.target.autonomous,
+        });
+        const summary = `Plan generated with ${planned.discoveredCommands.length} discovered and ${planned.autonomousCommands.length} autonomous commands.`;
+        store.completeRun(record, runId, startedAt, "passed", summary, Date.now());
+        console.log(successLine(summary));
+      } else {
+        const result = await executeTestWorkflow({
+          workspace: record.target.workspace,
+          dir: record.target.dir,
+          model: record.target.model,
+          provider: record.target.provider,
+          timeoutMs: record.target.timeoutMs,
+          maxAuto: record.target.maxAuto,
+          autonomous: record.target.autonomous,
+        });
+        const failed = result.report.results.filter((item) => !item.passed).length;
+        store.completeRun(
+          record,
+          runId,
+          startedAt,
+          failed === 0 ? "passed" : "failed",
+          failed === 0
+            ? "Automation completed successfully."
+            : `Automation completed with ${failed} failing command(s).`,
+          Date.now()
+        );
+        console.log(result.renderedReport);
+      }
+
+      store.close();
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+automationCmd
+  .command("daemon")
+  .description("Run the automation scheduler")
+  .option("-w, --workspace <name>", "Workspace to watch", "default")
+  .option("--poll-ms <n>", "Polling interval in milliseconds", "10000")
+  .action(async (options) => {
+    if (process.env.WEAVE_TEST_DISABLE_AUTOMATIONS === "1") {
+      console.log(errorLine("Automations are disabled by WEAVE_TEST_DISABLE_AUTOMATIONS=1"));
+      process.exit(1);
+    }
+    const { AutomationStore } = await import("./testing/automation-store.js");
+    const { renderSchedulerHeartbeat } = await import("./testing/automation-cli.js");
+    const { AutomationScheduler } = await import("./testing/scheduler.js");
+    const pollMs = Math.max(1000, parseInt(String(options.pollMs), 10) || 10000);
+    const store = await AutomationStore.create(options.workspace);
+    const scheduler = new AutomationScheduler(store, {
+      pollMs,
+      logger: (message) => console.log(`  ${t.dim(message)}`),
+    });
+
+    console.log("");
+    console.log(renderSchedulerHeartbeat(options.workspace, pollMs));
+    console.log(`  ${t.dim("Press Ctrl+C to stop.")}`);
     console.log("");
 
-    const results = runTestingCommands(
-      [...plan.commands, ...autonomousCommands],
-      targetDir,
-      timeoutMs
-    );
-    const insights = await buildTestingInsights(llm, model, plan, results);
-    const report = makeTestingReport(targetDir, plan, results, insights);
+    scheduler.start();
+    process.on("SIGINT", () => {
+      scheduler.stop();
+      store.close();
+      process.exit(0);
+    });
+  });
 
-    await persistRunToMemory(orchestrator, edgeHunter, reporter, report);
-    fabric.save();
-    fabric.close();
+automationCmd
+  .command("remind <when>")
+  .description("Create a one-time reminder automation")
+  .requiredOption("-n, --name <name>", "Automation name")
+  .requiredOption("-d, --dir <path>", "Target project directory")
+  .option("-w, --workspace <name>", "Workspace to store and run in", "default")
+  .option("--target <type>", "Automation target (testRun|testPlan)", "testRun")
+  .option("-t, --timeout <ms>", "Per-command timeout in milliseconds", "120000")
+  .option("--max-auto <n>", "Maximum autonomous test commands to add", "0")
+  .option("--no-autonomous", "Disable autonomous expansion")
+  .option("-m, --model <model>", "Model to use")
+  .option("-p, --provider <provider>", "Provider to use")
+  .action(async (when, options) => {
+    const { AutomationStore } = await import("./testing/automation-store.js");
+    const {
+      buildAutomationTarget,
+      buildAutomationTrigger,
+      renderAutomationCreated,
+    } = await import("./testing/automation-cli.js");
+    const store = await AutomationStore.create(options.workspace);
+    const record = store.create({
+      name: options.name,
+      trigger: buildAutomationTrigger({ at: when }),
+      target: buildAutomationTarget({
+        target: options.target,
+        dir: options.dir,
+        workspace: options.workspace,
+        timeout: options.timeout,
+        maxAuto: options.maxAuto,
+        autonomous: options.autonomous,
+        provider: options.provider,
+        model: options.model,
+      }),
+      maxFailures: 1,
+    });
+    console.log(renderAutomationCreated(record));
+    store.close();
+  });
 
-    console.log(renderTestingReport(report));
+automationCmd
+  .command("loop <interval>")
+  .description("Create a recurring automation with a Claude-style shortcut")
+  .requiredOption("-n, --name <name>", "Automation name")
+  .requiredOption("-d, --dir <path>", "Target project directory")
+  .option("-w, --workspace <name>", "Workspace to store and run in", "default")
+  .option("--target <type>", "Automation target (testRun|testPlan)", "testRun")
+  .option("-t, --timeout <ms>", "Per-command timeout in milliseconds", "120000")
+  .option("--max-auto <n>", "Maximum autonomous test commands to add", "0")
+  .option("--no-autonomous", "Disable autonomous expansion")
+  .option("--max-failures <n>", "Auto-pause after this many consecutive failures", "3")
+  .option("-m, --model <model>", "Model to use")
+  .option("-p, --provider <provider>", "Provider to use")
+  .action(async (interval, options) => {
+    const { AutomationStore } = await import("./testing/automation-store.js");
+    const {
+      buildAutomationTarget,
+      buildAutomationTrigger,
+      renderAutomationCreated,
+    } = await import("./testing/automation-cli.js");
+    const store = await AutomationStore.create(options.workspace);
+    const record = store.create({
+      name: options.name,
+      trigger: buildAutomationTrigger({ every: interval }),
+      target: buildAutomationTarget({
+        target: options.target,
+        dir: options.dir,
+        workspace: options.workspace,
+        timeout: options.timeout,
+        maxAuto: options.maxAuto,
+        autonomous: options.autonomous,
+        provider: options.provider,
+        model: options.model,
+      }),
+      maxFailures: Math.max(1, parseInt(String(options.maxFailures), 10) || 3),
+    });
+    console.log(renderAutomationCreated(record));
+    store.close();
   });
 
 // ── weave config ───────────────────────────────────────────

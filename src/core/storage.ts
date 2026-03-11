@@ -4,6 +4,10 @@ import type {
   AgentPersona,
   AgentState,
 } from "./types.js";
+import type {
+  AutomationRecord,
+  AutomationRunRecord,
+} from "../testing/automation-types.js";
 
 export class Storage {
   private db: any;
@@ -59,6 +63,36 @@ export class Storage {
       CREATE INDEX IF NOT EXISTS idx_nodes_tier ON nodes(tier);
       CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id);
       CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
+
+      CREATE TABLE IF NOT EXISTS automations (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        trigger_json TEXT NOT NULL,
+        target_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        last_run_at INTEGER,
+        next_run_at INTEGER,
+        failure_count INTEGER NOT NULL,
+        max_failures INTEGER NOT NULL,
+        last_status TEXT,
+        last_summary TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS automation_runs (
+        id TEXT PRIMARY KEY,
+        automation_id TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        ended_at INTEGER,
+        status TEXT NOT NULL,
+        summary TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_automations_enabled_next
+        ON automations(enabled, next_run_at);
+      CREATE INDEX IF NOT EXISTS idx_automation_runs_automation
+        ON automation_runs(automation_id, started_at);
     `);
   }
 
@@ -185,6 +219,80 @@ export class Storage {
     this.db.prepare("UPDATE agents SET last_active = ? WHERE id = ?").run(Date.now(), id);
   }
 
+  saveAutomation(record: AutomationRecord): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO automations
+        (id, name, enabled, trigger_json, target_json, created_at, updated_at,
+         last_run_at, next_run_at, failure_count, max_failures, last_status, last_summary)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        record.id,
+        record.name,
+        record.enabled ? 1 : 0,
+        JSON.stringify(record.trigger),
+        JSON.stringify(record.target),
+        record.createdAt,
+        record.updatedAt,
+        record.lastRunAt ?? null,
+        record.nextRunAt ?? null,
+        record.failureCount,
+        record.maxFailures,
+        record.lastStatus ?? null,
+        record.lastSummary ?? null
+      );
+  }
+
+  loadAutomations(): AutomationRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM automations ORDER BY created_at ASC")
+      .all() as Record<string, unknown>[];
+    return rows.map(rowToAutomation);
+  }
+
+  loadAutomation(id: string): AutomationRecord | null {
+    const row = this.db
+      .prepare("SELECT * FROM automations WHERE id = ?")
+      .get(id) as Record<string, unknown> | undefined;
+    return row ? rowToAutomation(row) : null;
+  }
+
+  deleteAutomation(id: string): void {
+    this.db.prepare("DELETE FROM automation_runs WHERE automation_id = ?").run(id);
+    this.db.prepare("DELETE FROM automations WHERE id = ?").run(id);
+  }
+
+  saveAutomationRun(run: AutomationRunRecord): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO automation_runs
+        (id, automation_id, started_at, ended_at, status, summary)
+        VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        run.id,
+        run.automationId,
+        run.startedAt,
+        run.endedAt ?? null,
+        run.status,
+        run.summary
+      );
+  }
+
+  loadAutomationRuns(automationId?: string): AutomationRunRecord[] {
+    const rows = automationId
+      ? (this.db
+          .prepare(
+            "SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY started_at DESC"
+          )
+          .all(automationId) as Record<string, unknown>[])
+      : (this.db
+          .prepare("SELECT * FROM automation_runs ORDER BY started_at DESC")
+          .all() as Record<string, unknown>[]);
+    return rows.map(rowToAutomationRun);
+  }
+
   saveAll(nodes: MemoryNode[], edges: MemoryEdge[]): void {
     const txn = this.db.transaction(() => {
       for (const node of nodes) this.saveNode(node);
@@ -224,5 +332,49 @@ function rowToEdge(row: Record<string, unknown>): MemoryEdge {
     edgeType: row.edge_type as MemoryEdge["edgeType"],
     weight: row.weight as number,
     createdAt: row.created_at as number,
+  };
+}
+
+function rowToAutomation(row: Record<string, unknown>): AutomationRecord {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    enabled: Boolean(row.enabled),
+    trigger: JSON.parse(row.trigger_json as string),
+    target: JSON.parse(row.target_json as string),
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
+    lastRunAt:
+      row.last_run_at === null || row.last_run_at === undefined
+        ? undefined
+        : (row.last_run_at as number),
+    nextRunAt:
+      row.next_run_at === null || row.next_run_at === undefined
+        ? undefined
+        : (row.next_run_at as number),
+    failureCount: row.failure_count as number,
+    maxFailures: row.max_failures as number,
+    lastStatus:
+      row.last_status === null || row.last_status === undefined
+        ? undefined
+        : (row.last_status as AutomationRecord["lastStatus"]),
+    lastSummary:
+      row.last_summary === null || row.last_summary === undefined
+        ? undefined
+        : (row.last_summary as string),
+  };
+}
+
+function rowToAutomationRun(row: Record<string, unknown>): AutomationRunRecord {
+  return {
+    id: row.id as string,
+    automationId: row.automation_id as string,
+    startedAt: row.started_at as number,
+    endedAt:
+      row.ended_at === null || row.ended_at === undefined
+        ? undefined
+        : (row.ended_at as number),
+    status: row.status as AutomationRunRecord["status"],
+    summary: row.summary as string,
   };
 }

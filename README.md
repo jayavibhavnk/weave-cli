@@ -83,6 +83,12 @@ weave test run --provider anthropic     # use another model provider
 weave test run --model gpt-4o-mini      # choose specific model for insights
 weave test run --max-auto 5             # add up to 5 autonomous expansions
 weave test run --no-autonomous          # run only discovered commands
+
+weave-test automation create --name "nightly smoke" --dir . --every 1d
+weave-test automation remind "in 45 minutes" --name "rerun tests" --dir .
+weave-test automation list
+weave-test automation run <id>
+weave-test automation daemon            # keep scheduler running locally
 ```
 
 The testing workflow:
@@ -91,6 +97,29 @@ The testing workflow:
 - runs them as a multi-step pipeline,
 - analyzes failures and edge-case gaps,
 - persists run intelligence to memory for future sessions.
+
+### Automations
+
+`weave-test` now supports durable test automations:
+
+- `automation create` for recurring schedules via `--every` or `--cron`
+- `automation remind` for one-time reminders/check-backs
+- `automation loop` as a Claude-style recurring shortcut
+- `automation daemon` to keep due automations running locally
+
+Examples:
+
+```bash
+weave-test automation create --name "daily regression" --dir . --every 1d
+weave-test automation create --name "weekday smoke" --dir . --cron "0 9 * * 1-5"
+weave-test automation remind "in 2 hours" --name "rerun failed checks" --dir .
+weave-test automation loop 30m --name "poll health" --dir . --target testPlan
+weave-test automation list
+weave-test automation pause <id>
+weave-test automation resume <id>
+weave-test automation run <id>
+weave-test automation daemon --poll-ms 10000
+```
 
 ### Chat
 
