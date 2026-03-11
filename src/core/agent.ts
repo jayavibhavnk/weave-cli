@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {
   type MemoryNode,
   type AgentPersona,
@@ -207,8 +209,6 @@ export class AgentMemory {
   }
 
   private loadWeaveContext(): string | null {
-    const fs = require("node:fs");
-    const path = require("node:path");
     const candidates = ["WEAVE.md", "weave.md", "AGENTS.md"];
     for (const name of candidates) {
       const full = path.resolve(process.cwd(), name);
