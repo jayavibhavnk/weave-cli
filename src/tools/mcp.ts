@@ -72,7 +72,7 @@ export class MCPClient {
     await this.sendRequest(proc, "initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "weave", version: "0.3.0" },
+      clientInfo: { name: "weave", version: "0.4.0" },
     });
 
     await this.sendNotification(proc, "notifications/initialized", {});

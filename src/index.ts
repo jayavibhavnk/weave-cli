@@ -12,7 +12,7 @@ import {
 } from "./config.js";
 import { t, icons, banner, table, successLine, errorLine } from "./ui/theme.js";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 
 const program = new Command();
 
@@ -43,7 +43,10 @@ program
         `\n  ${t.accent("weave config set apiKey")} ${t.dim("<your-api-key>")}`
       );
       console.log(
-        `  ${t.dim("or set")} ${t.accent("OPENAI_API_KEY")} ${t.dim("/")} ${t.accent("ANTHROPIC_API_KEY")} ${t.dim("env var")}\n`
+        `  ${t.dim("or set")} ${t.accent("OPENAI_API_KEY")} ${t.dim("/")} ${t.accent("ANTHROPIC_API_KEY")} ${t.dim("env var")}`
+      );
+      console.log(
+        `  ${t.dim("For OpenAI only: run")} ${t.accent("codex login --api-key <key>")} ${t.dim("then weave will use ~/.codex/auth.json")}\n`
       );
       process.exit(1);
     }

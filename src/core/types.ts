@@ -87,6 +87,8 @@ export interface WeaveConfig {
   provider: LLMProviderName;
   apiKey?: string;
   baseURL?: string;
+  /** When true (default), try to use OpenAI key from Codex auth (~/.codex/auth.json) if no apiKey set. Use after `codex login --api-key`. */
+  useCodexAuth?: boolean;
   model: string;
   embeddingModel: string;
   embeddingBackend: "local" | "openai";

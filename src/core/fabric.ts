@@ -76,6 +76,10 @@ export class MemoryFabric {
   removeAgent(id: string): boolean {
     const agent = this.agents.get(id);
     if (!agent) return false;
+    const nodeIds = this.graph.getAgentNodes(id).map((n) => n.id);
+    for (const nid of nodeIds) {
+      this.graph.removeNode(nid);
+    }
     this.agents.delete(id);
     this.storage?.deleteAgent(id);
     return true;

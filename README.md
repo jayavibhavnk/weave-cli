@@ -40,7 +40,7 @@ npm link
 # Initialize
 weave init
 
-# Set your API key
+# Set your API key (or use Codex auth — see below)
 weave config set apiKey sk-your-openai-key
 
 # Start chatting (memories persist automatically)
@@ -119,9 +119,12 @@ weave config set provider openai       # or anthropic, ollama, lmstudio
 weave config set model gpt-4o
 weave config set baseURL http://localhost:11434/v1  # for ollama/lmstudio (optional)
 weave config set embeddingBackend local # or openai
+weave config set useCodexAuth true   # use OpenAI key from Codex auth (default: true)
 weave config list
 weave config get provider
 ```
+
+**OpenAI without setting an API key (Codex login):** If you use [OpenAI Codex](https://developers.openai.com/codex) and have run `codex login --api-key <key>`, Weave can use the cached key from `~/.codex/auth.json` so you don't need to set `weave config set apiKey`. Ensure `useCodexAuth` is not set to `false`. Set `CODEX_HOME` if your Codex config lives elsewhere.
 
 ### Workspaces
 

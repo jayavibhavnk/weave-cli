@@ -7,6 +7,11 @@ const CONFIG_DIR = path.join(os.homedir(), ".weave");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 const WORKSPACES_DIR = path.join(CONFIG_DIR, "workspaces");
 
+function getCodexAuthPath(): string {
+  const home = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+  return path.join(home, "auth.json");
+}
+
 export function ensureConfigDir(): void {
   if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
   if (!fs.existsSync(WORKSPACES_DIR))
@@ -115,13 +120,45 @@ export function listWorkspaces(): string[] {
   }
 }
 
+/**
+ * Try to read OpenAI API key from Codex's auth.json (e.g. after `codex login --api-key`).
+ * See: https://developers.openai.com/codex/auth/
+ */
+export function getCodexAuthApiKey(): string | undefined {
+  try {
+    const authPath = getCodexAuthPath();
+    if (!fs.existsSync(authPath)) return undefined;
+    const raw = fs.readFileSync(authPath, "utf-8");
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const candidates = [
+      data.api_key,
+      data.apiKey,
+      data.openai_api_key,
+      (data.credentials as Record<string, unknown>)?.api_key,
+    ];
+    for (const v of candidates) {
+      if (typeof v === "string" && v.startsWith("sk-") && v.length > 20) {
+        return v;
+      }
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function resolveApiKey(config: WeaveConfig): string | undefined {
   if (config.provider === "ollama" || config.provider === "lmstudio") {
     return config.apiKey ?? "ollama";
   }
   if (config.apiKey) return config.apiKey;
   if (config.provider === "anthropic") return process.env.ANTHROPIC_API_KEY;
-  return process.env.OPENAI_API_KEY;
+  const envKey = process.env.OPENAI_API_KEY;
+  if (envKey) return envKey;
+  if (config.provider === "openai" && config.useCodexAuth !== false) {
+    return getCodexAuthApiKey();
+  }
+  return undefined;
 }
 
 export function getProviderBaseURL(
