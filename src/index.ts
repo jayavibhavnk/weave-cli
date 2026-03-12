@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
+import * as path from "node:path";
 import { Command } from "commander";
 import {
   loadConfig,
+  saveConfig,
   setConfigValue,
   getConfigValue,
   resolveApiKey,
@@ -17,8 +19,8 @@ const VERSION = "0.4.0";
 const program = new Command();
 
 program
-  .name("weave")
-  .description("Graph-native memory CLI for AI agents")
+  .name("weave-test")
+  .description("Testing-native multi-agent CLI with persistent memory")
   .version(VERSION, "-v, --version");
 
 // ── weave chat ─────────────────────────────────────────────
@@ -40,13 +42,13 @@ program
       console.log("");
       console.log(errorLine("No API key found. Set one with:"));
       console.log(
-        `\n  ${t.accent("weave config set apiKey")} ${t.dim("<your-api-key>")}`
+        `\n  ${t.accent("weave-test config set apiKey")} ${t.dim("<your-api-key>")}`
       );
       console.log(
         `  ${t.dim("or set")} ${t.accent("OPENAI_API_KEY")} ${t.dim("/")} ${t.accent("ANTHROPIC_API_KEY")} ${t.dim("env var")}`
       );
       console.log(
-        `  ${t.dim("For OpenAI only: run")} ${t.accent("codex login --api-key <key>")} ${t.dim("then weave will use ~/.codex/auth.json")}\n`
+        `  ${t.dim("For OpenAI only: run")} ${t.accent("codex login --api-key <key>")} ${t.dim("then weave-test will use ~/.codex/auth.json")}\n`
       );
       process.exit(1);
     }
@@ -130,7 +132,7 @@ agentCmd
     const agents = fabric.listAgents();
     if (agents.length === 0) {
       console.log(
-        `\n  ${t.dim("No agents yet. Create one with:")} ${t.accent("weave agent spawn <name>")}\n`
+        `\n  ${t.dim("No agents yet. Create one with:")} ${t.accent("weave-test agent spawn <name>")}\n`
       );
     } else {
       const rows = agents.map((a) => {
@@ -346,6 +348,739 @@ memoryCmd
     console.log(`  ${t.success(icons.check)} Pruned:    ${result.pruned}\n`);
   });
 
+// ── weave test ─────────────────────────────────────────────
+const testCmd = program.command("test").description("Testing-focused multi-agent workflow");
+
+testCmd
+  .command("init")
+  .description("Create default testing agents")
+  .option("-w, --workspace <name>", "Workspace to use", "default")
+  .action(async (options) => {
+    const config = loadConfig();
+    const workspacePath = getWorkspacePath(options.workspace);
+
+    const { MemoryFabric } = await import("./core/fabric.js");
+    const fabric = await MemoryFabric.create({ ...config, workspacePath });
+
+    const defaults = [
+      {
+        id: "test-orchestrator",
+        name: "test-orchestrator",
+        role: "QA Orchestrator",
+        description: "Coordinates multi-step test execution and prioritizes fixes by risk.",
+      },
+      {
+        id: "edge-case-hunter",
+        name: "edge-case-hunter",
+        role: "Edge Case Hunter",
+        description: "Finds negative, boundary, race-condition, and regression edge cases.",
+      },
+      {
+        id: "report-analyst",
+        name: "report-analyst",
+        role: "Test Report Analyst",
+        description: "Turns noisy test output into actionable summaries and next steps.",
+      },
+    ];
+
+    for (const persona of defaults) {
+      fabric.getOrCreateAgent(persona.id, persona);
+    }
+    fabric.save();
+    fabric.close();
+    console.log(successLine("Testing agents initialized."));
+  });
+
+testCmd
+  .command("plan")
+  .description("Show discovered and autonomous testing plan without executing")
+  .option("-d, --dir <path>", "Target project directory", process.cwd())
+  .option("-m, --model <model>", "Model to use for autonomous planning")
+  .option("-p, --provider <provider>", "LLM provider (openai|anthropic|ollama|lmstudio)")
+  .option("--max-auto <n>", "Maximum autonomous test commands to add (0 disables)", "0")
+  .option("--no-autonomous", "Disable autonomous test expansion")
+  .action(async (options) => {
+    try {
+      const { planTestWorkflow } = await import("./testing/run-workflow.js");
+      const targetDir = String(options.dir);
+      const maxAutonomous = Math.max(0, parseInt(String(options.maxAuto), 10) || 0);
+      const autonomousEnabled = Boolean(options.autonomous);
+      const plan = await planTestWorkflow({
+        workspace: "default",
+        dir: targetDir,
+        model: options.model,
+        provider: options.provider,
+        maxAuto: maxAutonomous,
+        autonomous: autonomousEnabled,
+      });
+
+      console.log(`\n  ${t.brandBold("Testing plan")}`);
+      console.log(`  ${t.muted("─".repeat(50))}`);
+      for (const cmd of plan.discoveredCommands) {
+        console.log(`  ${t.muted(icons.arrow)} ${cmd.label} ${t.dim(`(${cmd.command})`)}`);
+      }
+      if (plan.autonomousCommands.length > 0) {
+        console.log(`  ${t.brandBold("Autonomous additions")}`);
+        for (const cmd of plan.autonomousCommands) {
+          console.log(`  ${t.muted(icons.arrow)} ${cmd.label} ${t.dim(`(${cmd.command})`)}`);
+        }
+      }
+      console.log("");
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+testCmd
+  .command("run")
+  .description("Run discovered + autonomous tests, analyze results, and persist findings")
+  .option("-w, --workspace <name>", "Workspace to use", "default")
+  .option("-d, --dir <path>", "Target project directory", process.cwd())
+  .option("-m, --model <model>", "Model to use for testing insights")
+  .option("-p, --provider <provider>", "LLM provider (openai|anthropic|ollama|lmstudio)")
+  .option("-t, --timeout <ms>", "Per-command timeout in milliseconds", "120000")
+  .option("--max-auto <n>", "Maximum autonomous test commands to add (0 disables)", "0")
+  .option("--no-autonomous", "Disable autonomous test expansion")
+  .action(async (options) => {
+    try {
+      const { executeTestWorkflow } = await import("./testing/run-workflow.js");
+      const targetDir = String(options.dir);
+      const timeoutMs = parseInt(String(options.timeout), 10);
+      const maxAutonomous = Math.max(0, parseInt(String(options.maxAuto), 10) || 0);
+      const autonomousEnabled = Boolean(options.autonomous);
+
+      const result = await executeTestWorkflow({
+        workspace: options.workspace,
+        dir: targetDir,
+        model: options.model,
+        provider: options.provider,
+        timeoutMs,
+        maxAuto: maxAutonomous,
+        autonomous: autonomousEnabled,
+      });
+
+      console.log(`\n  ${t.brandBold("Running testing pipeline")}`);
+      console.log(`  ${t.muted("─".repeat(40))}`);
+      for (const cmd of result.discoveredCommands) {
+        console.log(`  ${t.muted(icons.arrow)} ${cmd.label} ${t.dim(`(${cmd.command})`)}`);
+      }
+      if (result.autonomousCommands.length > 0) {
+        console.log(`  ${t.brandBold("Autonomous expansions")}`);
+        for (const cmd of result.autonomousCommands) {
+          console.log(`  ${t.muted(icons.arrow)} ${cmd.label} ${t.dim(`(${cmd.command})`)}`);
+        }
+      }
+      console.log("");
+      console.log(result.renderedReport);
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+// ── weave-test automation ─────────────────────────────────
+const automationCmd = program
+  .command("automation")
+  .description("Durable automations for recurring testing workflows");
+
+automationCmd
+  .command("create")
+  .description("Create a durable automation")
+  .requiredOption("-n, --name <name>", "Automation name")
+  .requiredOption("-d, --dir <path>", "Target project directory")
+  .option("-w, --workspace <name>", "Workspace to store and run in", "default")
+  .option("--target <type>", "Automation target (testRun|testPlan)", "testRun")
+  .option("--every <interval>", "Recurring interval like 15m, 2h, or 1d")
+  .option("--cron <expr>", "5-field cron expression")
+  .option("--at <time>", "One-shot reminder time like `in 45 minutes` or an ISO date")
+  .option("-t, --timeout <ms>", "Per-command timeout in milliseconds", "120000")
+  .option("--max-auto <n>", "Maximum autonomous test commands to add", "0")
+  .option("--no-autonomous", "Disable autonomous expansion")
+  .option("--max-failures <n>", "Auto-pause after this many consecutive failures", "3")
+  .option("-m, --model <model>", "Model to use")
+  .option("-p, --provider <provider>", "Provider to use")
+  .action(async (options) => {
+    try {
+      const { AutomationStore } = await import("./testing/automation-store.js");
+      const {
+        buildAutomationTarget,
+        buildAutomationTrigger,
+        renderAutomationCreated,
+      } = await import("./testing/automation-cli.js");
+      const store = await AutomationStore.create(options.workspace);
+      const trigger = buildAutomationTrigger({
+        every: options.every,
+        cron: options.cron,
+        at: options.at,
+      });
+      const target = buildAutomationTarget({
+        target: options.target,
+        dir: options.dir,
+        workspace: options.workspace,
+        timeout: options.timeout,
+        maxAuto: options.maxAuto,
+        autonomous: options.autonomous,
+        provider: options.provider,
+        model: options.model,
+      });
+      const record = store.create({
+        name: options.name,
+        trigger,
+        target,
+        maxFailures: Math.max(1, parseInt(String(options.maxFailures), 10) || 3),
+      });
+      console.log(renderAutomationCreated(record));
+      store.close();
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+automationCmd
+  .command("list")
+  .description("List automations")
+  .option("-w, --workspace <name>", "Workspace to inspect", "default")
+  .action(async (options) => {
+    const { AutomationStore } = await import("./testing/automation-store.js");
+    const { renderAutomationTable } = await import("./testing/automation-cli.js");
+    const store = await AutomationStore.create(options.workspace);
+    const records = store.list();
+    if (records.length === 0) {
+      console.log(`\n  ${t.dim("No automations yet. Create one with:")} ${t.accent("weave-test automation create")}\n`);
+    } else {
+      console.log("");
+      console.log(renderAutomationTable(records));
+      console.log("");
+    }
+    store.close();
+  });
+
+automationCmd
+  .command("delete <id>")
+  .description("Delete an automation")
+  .option("-w, --workspace <name>", "Workspace to modify", "default")
+  .action(async (id, options) => {
+    const { AutomationStore } = await import("./testing/automation-store.js");
+    const store = await AutomationStore.create(options.workspace);
+    const record = store.get(id);
+    if (!record) {
+      console.log(errorLine(`Automation "${id}" not found.`));
+      store.close();
+      process.exit(1);
+    }
+    store.delete(id);
+    store.close();
+    console.log(successLine(`Automation "${id}" deleted.`));
+  });
+
+automationCmd
+  .command("pause <id>")
+  .description("Pause an automation")
+  .option("-w, --workspace <name>", "Workspace to modify", "default")
+  .action(async (id, options) => {
+    const { AutomationStore } = await import("./testing/automation-store.js");
+    const store = await AutomationStore.create(options.workspace);
+    const updated = store.setEnabled(id, false);
+    store.close();
+    if (!updated) {
+      console.log(errorLine(`Automation "${id}" not found.`));
+      process.exit(1);
+    }
+    console.log(successLine(`Automation "${id}" paused.`));
+  });
+
+automationCmd
+  .command("resume <id>")
+  .description("Resume an automation")
+  .option("-w, --workspace <name>", "Workspace to modify", "default")
+  .action(async (id, options) => {
+    const { AutomationStore } = await import("./testing/automation-store.js");
+    const { computeNextRunAt } = await import("./testing/automation-store.js");
+    const store = await AutomationStore.create(options.workspace);
+    const record = store.get(id);
+    if (!record) {
+      store.close();
+      console.log(errorLine(`Automation "${id}" not found.`));
+      process.exit(1);
+    }
+    record.enabled = true;
+    record.failureCount = 0;
+    record.nextRunAt = record.nextRunAt ?? computeNextRunAt(record.trigger);
+    store.save(record);
+    store.close();
+    console.log(successLine(`Automation "${id}" resumed.`));
+  });
+
+automationCmd
+  .command("run <id>")
+  .description("Run an automation immediately")
+  .option("-w, --workspace <name>", "Workspace to load from", "default")
+  .action(async (id, options) => {
+    try {
+      const { AutomationStore } = await import("./testing/automation-store.js");
+      const { executeTestWorkflow, planTestWorkflow } = await import("./testing/run-workflow.js");
+      const store = await AutomationStore.create(options.workspace);
+      const record = store.get(id);
+      if (!record) {
+        store.close();
+        console.log(errorLine(`Automation "${id}" not found.`));
+        process.exit(1);
+      }
+
+      const runId = `${record.id}-manual-${Date.now()}`;
+      const startedAt = Date.now();
+      store.appendRun({
+        id: runId,
+        automationId: record.id,
+        startedAt,
+        status: "running",
+        summary: "Manual automation run started.",
+      });
+
+      if (record.target.type === "testPlan") {
+        const planned = await planTestWorkflow({
+          workspace: record.target.workspace,
+          dir: record.target.dir,
+          model: record.target.model,
+          provider: record.target.provider,
+          timeoutMs: record.target.timeoutMs,
+          maxAuto: record.target.maxAuto,
+          autonomous: record.target.autonomous,
+        });
+        const summary = `Plan generated with ${planned.discoveredCommands.length} discovered and ${planned.autonomousCommands.length} autonomous commands.`;
+        store.completeRun(record, runId, startedAt, "passed", summary, Date.now());
+        console.log(successLine(summary));
+      } else {
+        const result = await executeTestWorkflow({
+          workspace: record.target.workspace,
+          dir: record.target.dir,
+          model: record.target.model,
+          provider: record.target.provider,
+          timeoutMs: record.target.timeoutMs,
+          maxAuto: record.target.maxAuto,
+          autonomous: record.target.autonomous,
+        });
+        const failed = result.report.results.filter((item) => !item.passed).length;
+        store.completeRun(
+          record,
+          runId,
+          startedAt,
+          failed === 0 ? "passed" : "failed",
+          failed === 0
+            ? "Automation completed successfully."
+            : `Automation completed with ${failed} failing command(s).`,
+          Date.now()
+        );
+        console.log(result.renderedReport);
+      }
+
+      store.close();
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+automationCmd
+  .command("daemon")
+  .description("Run the automation scheduler")
+  .option("-w, --workspace <name>", "Workspace to watch", "default")
+  .option("--poll-ms <n>", "Polling interval in milliseconds", "10000")
+  .action(async (options) => {
+    if (process.env.WEAVE_TEST_DISABLE_AUTOMATIONS === "1") {
+      console.log(errorLine("Automations are disabled by WEAVE_TEST_DISABLE_AUTOMATIONS=1"));
+      process.exit(1);
+    }
+    const { AutomationStore } = await import("./testing/automation-store.js");
+    const { renderSchedulerHeartbeat } = await import("./testing/automation-cli.js");
+    const { AutomationScheduler } = await import("./testing/scheduler.js");
+    const pollMs = Math.max(1000, parseInt(String(options.pollMs), 10) || 10000);
+    const store = await AutomationStore.create(options.workspace);
+    const scheduler = new AutomationScheduler(store, {
+      pollMs,
+      logger: (message) => console.log(`  ${t.dim(message)}`),
+    });
+
+    console.log("");
+    console.log(renderSchedulerHeartbeat(options.workspace, pollMs));
+    console.log(`  ${t.dim("Press Ctrl+C to stop.")}`);
+    console.log("");
+
+    scheduler.start();
+    process.on("SIGINT", () => {
+      scheduler.stop();
+      store.close();
+      process.exit(0);
+    });
+  });
+
+automationCmd
+  .command("remind <when>")
+  .description("Create a one-time reminder automation")
+  .requiredOption("-n, --name <name>", "Automation name")
+  .requiredOption("-d, --dir <path>", "Target project directory")
+  .option("-w, --workspace <name>", "Workspace to store and run in", "default")
+  .option("--target <type>", "Automation target (testRun|testPlan)", "testRun")
+  .option("-t, --timeout <ms>", "Per-command timeout in milliseconds", "120000")
+  .option("--max-auto <n>", "Maximum autonomous test commands to add", "0")
+  .option("--no-autonomous", "Disable autonomous expansion")
+  .option("-m, --model <model>", "Model to use")
+  .option("-p, --provider <provider>", "Provider to use")
+  .action(async (when, options) => {
+    const { AutomationStore } = await import("./testing/automation-store.js");
+    const {
+      buildAutomationTarget,
+      buildAutomationTrigger,
+      renderAutomationCreated,
+    } = await import("./testing/automation-cli.js");
+    const store = await AutomationStore.create(options.workspace);
+    const record = store.create({
+      name: options.name,
+      trigger: buildAutomationTrigger({ at: when }),
+      target: buildAutomationTarget({
+        target: options.target,
+        dir: options.dir,
+        workspace: options.workspace,
+        timeout: options.timeout,
+        maxAuto: options.maxAuto,
+        autonomous: options.autonomous,
+        provider: options.provider,
+        model: options.model,
+      }),
+      maxFailures: 1,
+    });
+    console.log(renderAutomationCreated(record));
+    store.close();
+  });
+
+automationCmd
+  .command("loop <interval>")
+  .description("Create a recurring automation with a Claude-style shortcut")
+  .requiredOption("-n, --name <name>", "Automation name")
+  .requiredOption("-d, --dir <path>", "Target project directory")
+  .option("-w, --workspace <name>", "Workspace to store and run in", "default")
+  .option("--target <type>", "Automation target (testRun|testPlan)", "testRun")
+  .option("-t, --timeout <ms>", "Per-command timeout in milliseconds", "120000")
+  .option("--max-auto <n>", "Maximum autonomous test commands to add", "0")
+  .option("--no-autonomous", "Disable autonomous expansion")
+  .option("--max-failures <n>", "Auto-pause after this many consecutive failures", "3")
+  .option("-m, --model <model>", "Model to use")
+  .option("-p, --provider <provider>", "Provider to use")
+  .action(async (interval, options) => {
+    const { AutomationStore } = await import("./testing/automation-store.js");
+    const {
+      buildAutomationTarget,
+      buildAutomationTrigger,
+      renderAutomationCreated,
+    } = await import("./testing/automation-cli.js");
+    const store = await AutomationStore.create(options.workspace);
+    const record = store.create({
+      name: options.name,
+      trigger: buildAutomationTrigger({ every: interval }),
+      target: buildAutomationTarget({
+        target: options.target,
+        dir: options.dir,
+        workspace: options.workspace,
+        timeout: options.timeout,
+        maxAuto: options.maxAuto,
+        autonomous: options.autonomous,
+        provider: options.provider,
+        model: options.model,
+      }),
+      maxFailures: Math.max(1, parseInt(String(options.maxFailures), 10) || 3),
+    });
+    console.log(renderAutomationCreated(record));
+    store.close();
+  });
+
+// ── weave-test github ─────────────────────────────────────
+const githubCmd = program.command("github").description("GitHub-backed repository actions");
+const githubAuthCmd = githubCmd.command("auth").description("Choose how GitHub writes authenticate");
+
+const githubAppCmd = githubCmd.command("app").description("Manage GitHub App configuration");
+
+githubAuthCmd
+  .command("use-app")
+  .description("Use GitHub App auth for future GitHub commands")
+  .action(() => {
+    saveConfig({ githubAuthMode: "app" });
+    console.log(successLine("GitHub auth mode set to app."));
+  });
+
+githubAuthCmd
+  .command("use-bot")
+  .description("Use a bot token for future GitHub commands")
+  .option("--username <name>", "Bot GitHub username")
+  .action((options) => {
+    saveConfig({
+      githubAuthMode: "token",
+      githubBotUsername: options.username,
+    });
+    console.log(successLine("GitHub auth mode set to token."));
+    if (!process.env.WEAVE_TEST_GITHUB_BOT_TOKEN && !process.env.GITHUB_TOKEN && !process.env.GH_TOKEN) {
+      console.log("");
+      console.log(errorLine("Set WEAVE_TEST_GITHUB_BOT_TOKEN (or GITHUB_TOKEN / GH_TOKEN) before using token mode."));
+    }
+  });
+
+githubAuthCmd
+  .command("status")
+  .description("Show the currently selected GitHub auth mode")
+  .action(async () => {
+    try {
+      const config = loadConfig();
+      const { getGithubAuthStatus } = await import("./github/write-flow.js");
+      const { renderGithubAuthStatus } = await import("./github/cli.js");
+      console.log(renderGithubAuthStatus(getGithubAuthStatus(config)));
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+githubAppCmd
+  .command("init")
+  .description("Save GitHub App configuration")
+  .requiredOption("--app-id <id>", "GitHub App ID")
+  .option("--private-key-path <path>", "Path to GitHub App private key PEM file")
+  .option("--owner <owner>", "Default GitHub owner/org")
+  .option("--repo <repo>", "Default GitHub repository")
+  .option("--api-base-url <url>", "GitHub API base URL")
+  .action((options) => {
+    if (!options.privateKeyPath && !process.env.GITHUB_APP_PRIVATE_KEY) {
+      console.log(errorLine("Provide --private-key-path or set GITHUB_APP_PRIVATE_KEY."));
+      process.exit(1);
+    }
+    saveConfig({
+      githubAppId: options.appId,
+      githubAppPrivateKeyPath: options.privateKeyPath,
+      githubOwner: options.owner,
+      githubRepo: options.repo,
+      githubApiBaseUrl: options.apiBaseUrl,
+    });
+    console.log(successLine("GitHub App configuration saved."));
+  });
+
+githubAppCmd
+  .command("status")
+  .description("Verify GitHub App auth and show current defaults")
+  .action(async () => {
+    try {
+      const config = loadConfig();
+      const { getGithubAppStatus } = await import("./github/write-flow.js");
+      const { renderGithubStatus } = await import("./github/cli.js");
+      const status = await getGithubAppStatus(config);
+      console.log(renderGithubStatus(status));
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+const githubRepoCmd = githubCmd.command("repo").description("Inspect and connect repositories");
+const githubBranchCmd = githubCmd.command("branch").description("Branch actions");
+
+githubRepoCmd
+  .command("connect")
+  .description("Verify repo access and optionally save defaults")
+  .requiredOption("--owner <owner>", "GitHub owner/org")
+  .requiredOption("--repo <repo>", "GitHub repository")
+  .option("--save-defaults", "Save owner/repo as defaults")
+  .action(async (options) => {
+    try {
+      const config = loadConfig();
+      const { listConnectedRepos } = await import("./github/write-flow.js");
+      const { renderGithubRepos } = await import("./github/cli.js");
+      const repos = await listConnectedRepos(config, options.owner, options.repo);
+      const match = repos.find((repo) => repo.full_name === `${options.owner}/${options.repo}`);
+      if (!match) {
+        console.log(errorLine(`GitHub access is not configured for ${options.owner}/${options.repo}.`));
+        process.exit(1);
+      }
+      if (options.saveDefaults) {
+        saveConfig({ githubOwner: options.owner, githubRepo: options.repo });
+      }
+      console.log("");
+      console.log(renderGithubRepos([match]));
+      console.log("");
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+githubBranchCmd
+  .command("create")
+  .description("Create a branch through the configured GitHub auth mode")
+  .requiredOption("--branch <name>", "Branch name to create")
+  .option("--base <branch>", "Base branch")
+  .option("--owner <owner>", "GitHub owner/org")
+  .option("--repo <repo>", "GitHub repository")
+  .action(async (options) => {
+    try {
+      const config = loadConfig();
+      const { createGithubBranch } = await import("./github/write-flow.js");
+      const { renderBranchCreated } = await import("./github/cli.js");
+      const result = await createGithubBranch(config, {
+        owner: options.owner,
+        repo: options.repo,
+        branch: options.branch,
+        baseBranch: options.base,
+      });
+      console.log(renderBranchCreated(result));
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+async function handleGithubCommitLike(
+  options: {
+    owner?: string;
+    repo?: string;
+    branch: string;
+    message: string;
+    dir: string;
+    paths: string[];
+  }
+): Promise<void> {
+  const config = loadConfig();
+  const { createGithubCommitFromFiles } = await import("./github/write-flow.js");
+  const { renderCommitResult } = await import("./github/cli.js");
+  const result = await createGithubCommitFromFiles(config, {
+    owner: options.owner,
+    repo: options.repo,
+    branch: options.branch,
+    message: options.message,
+    dir: options.dir,
+    filePaths: options.paths,
+  });
+  console.log(renderCommitResult(result));
+}
+
+async function handleGithubWorktreePush(
+  options: {
+    owner?: string;
+    repo?: string;
+    branch: string;
+    message: string;
+    dir: string;
+    createBranchIfMissing?: boolean;
+    base?: string;
+  }
+): Promise<void> {
+  const config = loadConfig();
+  const { pushGithubWorktree } = await import("./github/write-flow.js");
+  const { renderCommitResult } = await import("./github/cli.js");
+  const result = await pushGithubWorktree(config, {
+    owner: options.owner,
+    repo: options.repo,
+    branch: options.branch,
+    message: options.message,
+    dir: options.dir,
+    createBranchIfMissing: options.createBranchIfMissing,
+    baseBranch: options.base,
+  });
+  console.log(renderCommitResult(result));
+}
+
+githubCmd
+  .command("commit")
+  .description("Create a commit on a GitHub branch from local files")
+  .requiredOption("--branch <name>", "Target branch name")
+  .requiredOption("--message <text>", "Commit message")
+  .requiredOption("--dir <path>", "Local project directory")
+  .option("--owner <owner>", "GitHub owner/org")
+  .option("--repo <repo>", "GitHub repository")
+  .argument("<paths...>", "Files relative to --dir to include")
+  .action(async (paths, options) => {
+    try {
+      await handleGithubCommitLike({ ...options, paths });
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+githubCmd
+  .command("push")
+  .description("Push current local git worktree changes to a branch")
+  .requiredOption("--branch <name>", "Target branch name")
+  .requiredOption("--message <text>", "Commit message")
+  .requiredOption("--dir <path>", "Local project directory")
+  .option("--owner <owner>", "GitHub owner/org")
+  .option("--repo <repo>", "GitHub repository")
+  .option("--create-branch-if-missing", "Create the branch first if it does not exist")
+  .option("--base <branch>", "Base branch when creating a missing branch")
+  .action(async (options) => {
+    try {
+      await handleGithubWorktreePush({
+        ...options,
+        createBranchIfMissing: options.createBranchIfMissing,
+      });
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+githubCmd
+  .command("bot-push")
+  .description("Commit as the bot identity and push (like Cursor / Claude Code)")
+  .requiredOption("--branch <name>", "Target branch name")
+  .requiredOption("--message <text>", "Commit message")
+  .option("--dir <path>", "Local project directory", ".")
+  .option("--bot-username <name>", "Bot GitHub username", "weave-cli")
+  .action(async (options) => {
+    try {
+      const { gitCommitAndPushAsBot } = await import("./github/write-flow.js");
+      const { renderBotPushResult } = await import("./github/cli.js");
+      const result = gitCommitAndPushAsBot({
+        branch: options.branch,
+        message: options.message,
+        dir: path.resolve(options.dir),
+        botUsername: options.botUsername,
+      });
+      console.log(renderBotPushResult(result));
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+const githubPrCmd = githubCmd.command("pr").description("Pull request actions");
+
+githubPrCmd
+  .command("create")
+  .description("Create a pull request")
+  .requiredOption("--title <text>", "Pull request title")
+  .requiredOption("--head <branch>", "Head branch")
+  .option("--body <text>", "Pull request body", "")
+  .option("--base <branch>", "Base branch")
+  .option("--owner <owner>", "GitHub owner/org")
+  .option("--repo <repo>", "GitHub repository")
+  .action(async (options) => {
+    try {
+      const config = loadConfig();
+      const { createGithubPullRequest } = await import("./github/write-flow.js");
+      const { renderPullRequestResult } = await import("./github/cli.js");
+      const result = await createGithubPullRequest(config, {
+        owner: options.owner,
+        repo: options.repo,
+        title: options.title,
+        body: options.body,
+        head: options.head,
+        base: options.base,
+      });
+      console.log(renderPullRequestResult(result));
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
 // ── weave config ───────────────────────────────────────────
 const configCmd = program.command("config").description("Manage configuration");
 
@@ -512,20 +1247,20 @@ program
 // ── weave init ─────────────────────────────────────────────
 program
   .command("init")
-  .description("Initialize weave in the current directory")
+  .description("Initialize weave-test in the current directory")
   .action(() => {
     ensureConfigDir();
     console.log(banner(VERSION));
     console.log(successLine("Weave initialized!"));
     console.log(`\n  ${t.dim("Get started:")}`);
     console.log(
-      `  ${t.accent("weave config set apiKey")} ${t.dim("<your-api-key>")}  ${t.muted("# set your API key")}`
+      `  ${t.accent("weave-test config set apiKey")} ${t.dim("<your-api-key>")}  ${t.muted("# set your API key")}`
     );
     console.log(
-      `  ${t.accent("weave chat")}                              ${t.muted("# start chatting")}`
+      `  ${t.accent("weave-test test init")}                    ${t.muted("# bootstrap testing agents")}`
     );
     console.log(
-      `  ${t.accent("weave agent spawn researcher")}            ${t.muted("# create agents")}`
+      `  ${t.accent("weave-test test run")}                     ${t.muted("# run testing workflow")}`
     );
     console.log("");
   });

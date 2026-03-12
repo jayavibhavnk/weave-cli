@@ -4,7 +4,7 @@
   "description": "Graph-native memory CLI for AI agents — persistent, multi-agent, cross-session context",
   "type": "module",
   "bin": {
-    "weave": "./dist/index.js"
+    "weave-test": "./dist/index.js"
   },
   "main": "./dist/index.js",
   "files": [

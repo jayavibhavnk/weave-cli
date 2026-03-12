@@ -14,6 +14,12 @@ describe("tools/definitions", () => {
     expect(names).toContain("edit_file");
     expect(names).toContain("list_files");
     expect(names).toContain("search_files");
+    expect(names).toContain("github_list_repos");
+    expect(names).toContain("github_get_branch");
+    expect(names).toContain("github_create_branch");
+    expect(names).toContain("github_create_commit");
+    expect(names).toContain("github_create_pr");
+    expect(names).toContain("github_push_worktree");
   });
 
   it("each tool has name, description, parameters, requiresApproval", () => {

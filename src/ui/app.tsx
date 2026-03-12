@@ -433,7 +433,7 @@ export default function App({ fabric, initialAgent, provider, model, version }: 
               const output = await mcpClientRef.current.callTool(call.name, call.args);
               result = { success: true, output };
             } else {
-              result = executeTool(call.name, call.args);
+              result = await executeTool(call.name, call.args);
             }
 
             pushItem({ id: generateId(), type: "tool-result", name: call.name, output: result.output, success: result.success });

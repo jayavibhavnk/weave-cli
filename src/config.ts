@@ -28,20 +28,23 @@ export function getDefaultConfig(): WeaveConfig {
     embeddingDim: 256,
     defaultAgent: "assistant",
     workspacePath: path.join(WORKSPACES_DIR, "default.db"),
+    githubApiBaseUrl: "https://api.github.com",
+    githubAuthMode: "app",
   };
 }
 
 export function loadConfig(): WeaveConfig {
   ensureConfigDir();
   const defaults = getDefaultConfig();
+  let config = defaults;
 
   if (fs.existsSync(CONFIG_FILE)) {
     try {
       const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
       const saved = JSON.parse(raw);
-      return { ...defaults, ...saved };
+      config = { ...defaults, ...saved };
     } catch {
-      return defaults;
+      config = defaults;
     }
   }
 
@@ -49,14 +52,30 @@ export function loadConfig(): WeaveConfig {
   const envKey =
     process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY;
   if (envKey) {
-    defaults.apiKey = envKey;
+    config.apiKey = envKey;
     if (process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
-      defaults.provider = "anthropic";
-      defaults.model = "claude-sonnet-4-20250514";
+      config.provider = "anthropic";
+      config.model = "claude-sonnet-4-20250514";
     }
   }
 
-  return defaults;
+  if (process.env.GITHUB_APP_ID) config.githubAppId = process.env.GITHUB_APP_ID;
+  if (process.env.GITHUB_APP_PRIVATE_KEY)
+    config.githubAppPrivateKey = process.env.GITHUB_APP_PRIVATE_KEY;
+  if (process.env.GITHUB_APP_PRIVATE_KEY_PATH)
+    config.githubAppPrivateKeyPath = process.env.GITHUB_APP_PRIVATE_KEY_PATH;
+  if (process.env.GITHUB_OWNER) config.githubOwner = process.env.GITHUB_OWNER;
+  if (process.env.GITHUB_REPO) config.githubRepo = process.env.GITHUB_REPO;
+  if (process.env.GITHUB_API_BASE_URL)
+    config.githubApiBaseUrl = process.env.GITHUB_API_BASE_URL;
+  if (process.env.WEAVE_TEST_GITHUB_AUTH_MODE === "app" || process.env.WEAVE_TEST_GITHUB_AUTH_MODE === "token") {
+    config.githubAuthMode = process.env.WEAVE_TEST_GITHUB_AUTH_MODE;
+  }
+  if (process.env.WEAVE_TEST_GITHUB_BOT_USERNAME) {
+    config.githubBotUsername = process.env.WEAVE_TEST_GITHUB_BOT_USERNAME;
+  }
+
+  return config;
 }
 
 export function saveConfig(config: Partial<WeaveConfig>): void {
@@ -82,6 +101,7 @@ export function getConfigValue(key: string): unknown {
 }
 
 const VALID_PROVIDERS: LLMProviderName[] = ["openai", "anthropic", "ollama", "lmstudio"];
+const VALID_GITHUB_AUTH_MODES = ["app", "token"] as const;
 
 export function setConfigValue(key: string, value: string): void {
   const update: Record<string, unknown> = {};
@@ -96,6 +116,19 @@ export function setConfigValue(key: string, value: string): void {
       throw new Error(`Invalid provider: ${value}. Use one of: ${VALID_PROVIDERS.join(", ")}`);
     }
     update[key] = p;
+  } else if (key === "githubApiBaseUrl") {
+    try {
+      // Validate URL shape early.
+      new URL(value);
+    } catch {
+      throw new Error("githubApiBaseUrl must be a valid URL");
+    }
+    update[key] = value.replace(/\/$/, "");
+  } else if (key === "githubAuthMode") {
+    if (!VALID_GITHUB_AUTH_MODES.includes(value as (typeof VALID_GITHUB_AUTH_MODES)[number])) {
+      throw new Error(`githubAuthMode must be one of: ${VALID_GITHUB_AUTH_MODES.join(", ")}`);
+    }
+    update[key] = value;
   } else {
     update[key] = value;
   }
@@ -170,4 +203,16 @@ export function getProviderBaseURL(
   return provider === "ollama"
     ? "http://localhost:11434/v1"
     : "http://localhost:1234/v1";
+}
+
+export function getGithubApiBaseUrl(config?: Partial<WeaveConfig>): string {
+  return config?.githubApiBaseUrl || process.env.GITHUB_API_BASE_URL || "https://api.github.com";
+}
+
+export function getGithubBotToken(config?: Partial<WeaveConfig>): string | undefined {
+  return (
+    process.env.WEAVE_TEST_GITHUB_BOT_TOKEN ||
+    process.env.GITHUB_TOKEN ||
+    process.env.GH_TOKEN
+  );
 }
