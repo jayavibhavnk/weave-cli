@@ -1,17 +1,26 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
+import { loadConfig } from "../config.js";
+import {
+  createGithubBranch,
+  createGithubCommitFromFiles,
+  createGithubPullRequest,
+  getGithubBranchInfo,
+  listConnectedRepos,
+  pushGithubWorktree,
+} from "../github/write-flow.js";
 
 export interface ToolResult {
   success: boolean;
   output: string;
 }
 
-export function executeTool(
+export async function executeTool(
   name: string,
   args: Record<string, unknown>,
   cwd?: string
-): ToolResult {
+): Promise<ToolResult> {
   try {
     switch (name) {
       case "read_file":
@@ -46,6 +55,92 @@ export function executeTool(
           args.file_pattern as string | undefined,
           cwd
         );
+      case "github_list_repos": {
+        const config = loadConfig();
+        const repos = await listConnectedRepos(
+          config,
+          args.owner as string | undefined,
+          args.repo as string | undefined
+        );
+        return {
+          success: true,
+          output: repos.map((repo) => `${repo.full_name} (${repo.default_branch || "-"})`).join("\n") || "(no repos)",
+        };
+      }
+      case "github_get_branch": {
+        const config = loadConfig();
+        const result = await getGithubBranchInfo(config, {
+          owner: args.owner as string | undefined,
+          repo: args.repo as string | undefined,
+          branch: String(args.branch),
+        });
+        return {
+          success: true,
+          output: `${result.owner}/${result.repo} ${result.branch} ${result.sha}`,
+        };
+      }
+      case "github_create_branch": {
+        const config = loadConfig();
+        const result = await createGithubBranch(config, {
+          owner: args.owner as string | undefined,
+          repo: args.repo as string | undefined,
+          branch: String(args.branch),
+          baseBranch: args.base_branch as string | undefined,
+        });
+        return {
+          success: true,
+          output: `Created ${result.owner}/${result.repo}#${result.branch} at ${result.sha}`,
+        };
+      }
+      case "github_create_commit": {
+        const config = loadConfig();
+        const filePaths = Array.isArray(args.file_paths)
+          ? args.file_paths.map((item) => String(item))
+          : [];
+        const result = await createGithubCommitFromFiles(config, {
+          owner: args.owner as string | undefined,
+          repo: args.repo as string | undefined,
+          branch: String(args.branch),
+          message: String(args.message),
+          dir: String(args.dir),
+          filePaths,
+        });
+        return {
+          success: true,
+          output: `Committed ${result.changedFiles.join(", ")} to ${result.owner}/${result.repo}@${result.branch} (${result.commitSha})`,
+        };
+      }
+      case "github_create_pr": {
+        const config = loadConfig();
+        const result = await createGithubPullRequest(config, {
+          owner: args.owner as string | undefined,
+          repo: args.repo as string | undefined,
+          title: String(args.title),
+          body: args.body ? String(args.body) : "",
+          head: String(args.head),
+          base: args.base as string | undefined,
+        });
+        return {
+          success: true,
+          output: `Created PR #${result.number}: ${result.html_url}`,
+        };
+      }
+      case "github_push_worktree": {
+        const config = loadConfig();
+        const result = await pushGithubWorktree(config, {
+          owner: args.owner as string | undefined,
+          repo: args.repo as string | undefined,
+          branch: String(args.branch),
+          message: String(args.message),
+          dir: String(args.dir),
+          createBranchIfMissing: Boolean(args.create_branch_if_missing),
+          baseBranch: args.base_branch as string | undefined,
+        });
+        return {
+          success: true,
+          output: `Pushed worktree changes to ${result.owner}/${result.repo}@${result.branch} (${result.commitSha})\n${result.changedFiles.join("\n")}`,
+        };
+      }
       default:
         return { success: false, output: `Unknown tool: ${name}` };
     }

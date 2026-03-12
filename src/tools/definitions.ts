@@ -94,6 +94,107 @@ export const builtinTools: ToolDef[] = [
     },
     requiresApproval: false,
   },
+  {
+    name: "github_list_repos",
+    description: "List repositories accessible to the configured GitHub App installation.",
+    parameters: {
+      type: "object",
+      properties: {
+        owner: { type: "string", description: "GitHub owner or organization" },
+        repo: { type: "string", description: "Repository used to resolve installation access" },
+      },
+      required: [],
+    },
+    requiresApproval: true,
+  },
+  {
+    name: "github_get_branch",
+    description: "Get the latest commit SHA for a branch through the configured GitHub App.",
+    parameters: {
+      type: "object",
+      properties: {
+        owner: { type: "string", description: "GitHub owner or organization" },
+        repo: { type: "string", description: "GitHub repository" },
+        branch: { type: "string", description: "Branch name" },
+      },
+      required: ["branch"],
+    },
+    requiresApproval: true,
+  },
+  {
+    name: "github_create_branch",
+    description: "Create a branch in GitHub through the configured GitHub App.",
+    parameters: {
+      type: "object",
+      properties: {
+        owner: { type: "string", description: "GitHub owner or organization" },
+        repo: { type: "string", description: "GitHub repository" },
+        branch: { type: "string", description: "Branch name to create" },
+        base_branch: { type: "string", description: "Base branch to branch from" },
+      },
+      required: ["branch"],
+    },
+    requiresApproval: true,
+  },
+  {
+    name: "github_create_commit",
+    description: "Create a commit on a GitHub branch from local files via the GitHub App.",
+    parameters: {
+      type: "object",
+      properties: {
+        owner: { type: "string", description: "GitHub owner or organization" },
+        repo: { type: "string", description: "GitHub repository" },
+        branch: { type: "string", description: "Target branch" },
+        message: { type: "string", description: "Commit message" },
+        dir: { type: "string", description: "Local project directory" },
+        file_paths: {
+          type: "array",
+          description: "Files relative to dir to include",
+          items: { type: "string" },
+        },
+      },
+      required: ["branch", "message", "dir", "file_paths"],
+    },
+    requiresApproval: true,
+  },
+  {
+    name: "github_create_pr",
+    description: "Create a pull request through the configured GitHub App.",
+    parameters: {
+      type: "object",
+      properties: {
+        owner: { type: "string", description: "GitHub owner or organization" },
+        repo: { type: "string", description: "GitHub repository" },
+        title: { type: "string", description: "Pull request title" },
+        body: { type: "string", description: "Pull request body" },
+        head: { type: "string", description: "Head branch" },
+        base: { type: "string", description: "Base branch" },
+      },
+      required: ["title", "head"],
+    },
+    requiresApproval: true,
+  },
+  {
+    name: "github_push_worktree",
+    description: "Push the current local git worktree changes to a GitHub branch through the configured GitHub App.",
+    parameters: {
+      type: "object",
+      properties: {
+        owner: { type: "string", description: "GitHub owner or organization" },
+        repo: { type: "string", description: "GitHub repository" },
+        branch: { type: "string", description: "Target branch name" },
+        message: { type: "string", description: "Commit message" },
+        dir: { type: "string", description: "Local git repository directory" },
+        create_branch_if_missing: {
+          type: "boolean",
+          description: "Create the branch first if it does not exist",
+        },
+        base_branch: { type: "string", description: "Base branch when creating a missing branch" },
+      },
+      required: ["branch", "message", "dir"],
+    },
+    requiresApproval: true,
+  },
 ];
 
 export function toOpenAITools(tools: ToolDef[]): unknown[] {
