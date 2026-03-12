@@ -4,11 +4,10 @@ import { execSync } from "node:child_process";
 import { loadConfig } from "../config.js";
 import {
   createGithubBranch,
-  createGithubCommitFromFiles,
   createGithubPullRequest,
   getGithubBranchInfo,
   listConnectedRepos,
-  pushGithubWorktree,
+  gitCommitAndPushAsBot,
 } from "../github/write-flow.js";
 
 export interface ToolResult {
@@ -92,24 +91,6 @@ export async function executeTool(
           output: `Created ${result.owner}/${result.repo}#${result.branch} at ${result.sha}`,
         };
       }
-      case "github_create_commit": {
-        const config = loadConfig();
-        const filePaths = Array.isArray(args.file_paths)
-          ? args.file_paths.map((item) => String(item))
-          : [];
-        const result = await createGithubCommitFromFiles(config, {
-          owner: args.owner as string | undefined,
-          repo: args.repo as string | undefined,
-          branch: String(args.branch),
-          message: String(args.message),
-          dir: String(args.dir),
-          filePaths,
-        });
-        return {
-          success: true,
-          output: `Committed ${result.changedFiles.join(", ")} to ${result.owner}/${result.repo}@${result.branch} (${result.commitSha})`,
-        };
-      }
       case "github_create_pr": {
         const config = loadConfig();
         const result = await createGithubPullRequest(config, {
@@ -125,20 +106,16 @@ export async function executeTool(
           output: `Created PR #${result.number}: ${result.html_url}`,
         };
       }
-      case "github_push_worktree": {
-        const config = loadConfig();
-        const result = await pushGithubWorktree(config, {
-          owner: args.owner as string | undefined,
-          repo: args.repo as string | undefined,
+      case "github_push": {
+        const result = gitCommitAndPushAsBot({
           branch: String(args.branch),
           message: String(args.message),
-          dir: String(args.dir),
-          createBranchIfMissing: Boolean(args.create_branch_if_missing),
-          baseBranch: args.base_branch as string | undefined,
+          dir: String(args.dir || cwd || process.cwd()),
+          botUsername: args.bot_username as string | undefined,
         });
         return {
           success: true,
-          output: `Pushed worktree changes to ${result.owner}/${result.repo}@${result.branch} (${result.commitSha})\n${result.changedFiles.join("\n")}`,
+          output: `Committed and pushed to ${result.branch} as ${result.username} <${result.email}>`,
         };
       }
       default:

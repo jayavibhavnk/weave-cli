@@ -3,7 +3,6 @@ import type {
   GithubBlobResult,
   GithubCommitResult,
   GithubFileInput,
-  GithubWorktreeChange,
   GithubInstallation,
   GithubInstallationToken,
   GithubPullRequestResult,
@@ -182,14 +181,3 @@ export function createGithubClient(config: GithubAppConfig, fetchImpl?: typeof f
   return new GithubClient(config.apiBaseUrl.replace(/\/$/, ""), fetchImpl);
 }
 
-export function worktreeChangesToTreeEntries(
-  changes: GithubWorktreeChange[],
-  blobShasByPath: Map<string, string>
-): GithubTreeEntryInput[] {
-  return changes.map((change) => ({
-    path: change.repoPath,
-    mode: "100644",
-    type: "blob",
-    sha: change.kind === "delete" ? null : blobShasByPath.get(change.repoPath) || null,
-  }));
-}

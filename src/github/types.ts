@@ -6,14 +6,6 @@ export interface GithubAppConfig {
   repo?: string;
 }
 
-export interface GithubTokenConfig {
-  token: string;
-  apiBaseUrl: string;
-  owner?: string;
-  repo?: string;
-  username?: string;
-}
-
 export interface GithubInstallation {
   id: number;
   account: {
@@ -60,10 +52,4 @@ export interface GithubPullRequestResult {
 export interface GithubFileInput {
   repoPath: string;
   content: string;
-}
-
-export interface GithubWorktreeChange {
-  repoPath: string;
-  kind: "upsert" | "delete";
-  content?: string;
 }

@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
 import type { WeaveConfig } from "../core/types.js";
-import { getGithubApiBaseUrl, getGithubBotToken } from "../config.js";
-import type { GithubAppConfig, GithubTokenConfig } from "./types.js";
+import { getGithubApiBaseUrl } from "../config.js";
+import type { GithubAppConfig } from "./types.js";
 
 function base64url(input: Buffer | string): string {
   const buffer = typeof input === "string" ? Buffer.from(input) : input;
@@ -35,21 +35,6 @@ export function loadGithubAppConfig(config: WeaveConfig): GithubAppConfig | null
     apiBaseUrl: getGithubApiBaseUrl(config),
     owner: config.githubOwner || process.env.GITHUB_OWNER,
     repo: config.githubRepo || process.env.GITHUB_REPO,
-  };
-}
-
-export function loadGithubTokenConfig(config: WeaveConfig): GithubTokenConfig | null {
-  const token = getGithubBotToken(config);
-  if (!token) return null;
-  return {
-    token,
-    apiBaseUrl: getGithubApiBaseUrl(config),
-    owner: config.githubOwner || process.env.GITHUB_OWNER,
-    repo: config.githubRepo || process.env.GITHUB_REPO,
-    username:
-      config.githubBotUsername ||
-      process.env.WEAVE_TEST_GITHUB_BOT_USERNAME ||
-      process.env.GITHUB_ACTOR,
   };
 }
 

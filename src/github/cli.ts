@@ -18,28 +18,6 @@ export function renderGithubStatus(status: {
   ].join("\n");
 }
 
-export function renderGithubAuthStatus(status: {
-  mode: "app" | "token";
-  owner?: string;
-  repo?: string;
-  username?: string;
-  hasToken: boolean;
-  apiBaseUrl: string;
-}): string {
-  return [
-    "",
-    `  ${t.brandBold("GitHub Auth Status")}`,
-    `  ${t.muted("─".repeat(40))}`,
-    `  ${t.label("Mode")}   ${status.mode}`,
-    `  ${t.label("User")}   ${status.username || "-"}`,
-    `  ${t.label("Owner")}  ${status.owner || "-"}`,
-    `  ${t.label("Repo")}   ${status.repo || "-"}`,
-    `  ${t.label("Token")}  ${status.hasToken ? "present" : "missing"}`,
-    `  ${t.label("API")}    ${status.apiBaseUrl}`,
-    "",
-  ].join("\n");
-}
-
 export function renderGithubRepos(rows: { full_name: string; default_branch?: string }[]): string {
   return table(
     ["Repository", "Default Branch"],

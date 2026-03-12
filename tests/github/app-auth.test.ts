@@ -3,12 +3,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-  createGithubAppJwt,
-  loadGithubAppConfig,
-  loadGithubTokenConfig,
-  normalizePrivateKey,
-} from "../../src/github/app-auth.js";
+import { createGithubAppJwt, loadGithubAppConfig, normalizePrivateKey } from "../../src/github/app-auth.js";
 import { getDefaultConfig } from "../../src/config.js";
 
 describe("github app auth", () => {
@@ -63,30 +58,5 @@ describe("github app auth", () => {
     expect(config!.appId).toBe("1");
     expect(config!.privateKey).toContain("BEGIN RSA PRIVATE KEY");
     expect(config!.owner).toBe("acme");
-  });
-
-  it("loads token config from env", () => {
-    const originalToken = process.env.WEAVE_TEST_GITHUB_BOT_TOKEN;
-    const originalUser = process.env.WEAVE_TEST_GITHUB_BOT_USERNAME;
-    process.env.WEAVE_TEST_GITHUB_BOT_TOKEN = "bot-token";
-    process.env.WEAVE_TEST_GITHUB_BOT_USERNAME = "weave-bot";
-
-    try {
-      const config = loadGithubTokenConfig({
-        ...getDefaultConfig(),
-        githubOwner: "acme",
-        githubRepo: "repo",
-        githubAuthMode: "token",
-      });
-      expect(config).not.toBeNull();
-      expect(config!.token).toBe("bot-token");
-      expect(config!.username).toBe("weave-bot");
-      expect(config!.owner).toBe("acme");
-    } finally {
-      if (originalToken === undefined) delete process.env.WEAVE_TEST_GITHUB_BOT_TOKEN;
-      else process.env.WEAVE_TEST_GITHUB_BOT_TOKEN = originalToken;
-      if (originalUser === undefined) delete process.env.WEAVE_TEST_GITHUB_BOT_USERNAME;
-      else process.env.WEAVE_TEST_GITHUB_BOT_USERNAME = originalUser;
-    }
   });
 });

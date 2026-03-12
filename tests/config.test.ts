@@ -92,11 +92,6 @@ describe("config", () => {
       );
     });
 
-    it("throws for invalid githubAuthMode", () => {
-      expect(() => setConfigValue("githubAuthMode", "bad-mode")).toThrow(
-        /githubAuthMode must be one of: app, token/
-      );
-    });
   });
 
   describe("getCodexAuthApiKey", () => {
