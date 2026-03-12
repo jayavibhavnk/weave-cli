@@ -796,49 +796,9 @@ automationCmd
   });
 
 // ── weave-test github ─────────────────────────────────────
-const githubCmd = program.command("github").description("GitHub-backed repository actions");
-const githubAuthCmd = githubCmd.command("auth").description("Choose how GitHub writes authenticate");
+const githubCmd = program.command("github").description("GitHub repository actions");
 
 const githubAppCmd = githubCmd.command("app").description("Manage GitHub App configuration");
-
-githubAuthCmd
-  .command("use-app")
-  .description("Use GitHub App auth for future GitHub commands")
-  .action(() => {
-    saveConfig({ githubAuthMode: "app" });
-    console.log(successLine("GitHub auth mode set to app."));
-  });
-
-githubAuthCmd
-  .command("use-bot")
-  .description("Use a bot token for future GitHub commands")
-  .option("--username <name>", "Bot GitHub username")
-  .action((options) => {
-    saveConfig({
-      githubAuthMode: "token",
-      githubBotUsername: options.username,
-    });
-    console.log(successLine("GitHub auth mode set to token."));
-    if (!process.env.WEAVE_TEST_GITHUB_BOT_TOKEN && !process.env.GITHUB_TOKEN && !process.env.GH_TOKEN) {
-      console.log("");
-      console.log(errorLine("Set WEAVE_TEST_GITHUB_BOT_TOKEN (or GITHUB_TOKEN / GH_TOKEN) before using token mode."));
-    }
-  });
-
-githubAuthCmd
-  .command("status")
-  .description("Show the currently selected GitHub auth mode")
-  .action(async () => {
-    try {
-      const config = loadConfig();
-      const { getGithubAuthStatus } = await import("./github/write-flow.js");
-      const { renderGithubAuthStatus } = await import("./github/cli.js");
-      console.log(renderGithubAuthStatus(getGithubAuthStatus(config)));
-    } catch (err) {
-      console.log(errorLine(err instanceof Error ? err.message : String(err)));
-      process.exit(1);
-    }
-  });
 
 githubAppCmd
   .command("init")
@@ -930,96 +890,6 @@ githubBranchCmd
         baseBranch: options.base,
       });
       console.log(renderBranchCreated(result));
-    } catch (err) {
-      console.log(errorLine(err instanceof Error ? err.message : String(err)));
-      process.exit(1);
-    }
-  });
-
-async function handleGithubCommitLike(
-  options: {
-    owner?: string;
-    repo?: string;
-    branch: string;
-    message: string;
-    dir: string;
-    paths: string[];
-  }
-): Promise<void> {
-  const config = loadConfig();
-  const { createGithubCommitFromFiles } = await import("./github/write-flow.js");
-  const { renderCommitResult } = await import("./github/cli.js");
-  const result = await createGithubCommitFromFiles(config, {
-    owner: options.owner,
-    repo: options.repo,
-    branch: options.branch,
-    message: options.message,
-    dir: options.dir,
-    filePaths: options.paths,
-  });
-  console.log(renderCommitResult(result));
-}
-
-async function handleGithubWorktreePush(
-  options: {
-    owner?: string;
-    repo?: string;
-    branch: string;
-    message: string;
-    dir: string;
-    createBranchIfMissing?: boolean;
-    base?: string;
-  }
-): Promise<void> {
-  const config = loadConfig();
-  const { pushGithubWorktree } = await import("./github/write-flow.js");
-  const { renderCommitResult } = await import("./github/cli.js");
-  const result = await pushGithubWorktree(config, {
-    owner: options.owner,
-    repo: options.repo,
-    branch: options.branch,
-    message: options.message,
-    dir: options.dir,
-    createBranchIfMissing: options.createBranchIfMissing,
-    baseBranch: options.base,
-  });
-  console.log(renderCommitResult(result));
-}
-
-githubCmd
-  .command("commit")
-  .description("Create a commit on a GitHub branch from local files")
-  .requiredOption("--branch <name>", "Target branch name")
-  .requiredOption("--message <text>", "Commit message")
-  .requiredOption("--dir <path>", "Local project directory")
-  .option("--owner <owner>", "GitHub owner/org")
-  .option("--repo <repo>", "GitHub repository")
-  .argument("<paths...>", "Files relative to --dir to include")
-  .action(async (paths, options) => {
-    try {
-      await handleGithubCommitLike({ ...options, paths });
-    } catch (err) {
-      console.log(errorLine(err instanceof Error ? err.message : String(err)));
-      process.exit(1);
-    }
-  });
-
-githubCmd
-  .command("push")
-  .description("Push current local git worktree changes to a branch")
-  .requiredOption("--branch <name>", "Target branch name")
-  .requiredOption("--message <text>", "Commit message")
-  .requiredOption("--dir <path>", "Local project directory")
-  .option("--owner <owner>", "GitHub owner/org")
-  .option("--repo <repo>", "GitHub repository")
-  .option("--create-branch-if-missing", "Create the branch first if it does not exist")
-  .option("--base <branch>", "Base branch when creating a missing branch")
-  .action(async (options) => {
-    try {
-      await handleGithubWorktreePush({
-        ...options,
-        createBranchIfMissing: options.createBranchIfMissing,
-      });
     } catch (err) {
       console.log(errorLine(err instanceof Error ? err.message : String(err)));
       process.exit(1);

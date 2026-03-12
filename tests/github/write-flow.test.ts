@@ -9,9 +9,8 @@ import {
   createGithubCommitFromFiles,
   createGithubPullRequest,
   getGithubBranchInfo,
+  gitCommitAndPushAsBot,
   listConnectedRepos,
-  parseGitStatusPorcelain,
-  pushGithubWorktree,
 } from "../../src/github/write-flow.js";
 
 function makeConfig() {
@@ -71,13 +70,11 @@ describe("github write flow", () => {
     const queue = [
       responseJson({ message: "Not Found" }, 404),
       responseJson({ message: "Not Found" }, 404),
-      // branch create
       responseJson({ id: 7, account: { login: "acme" } }),
       responseJson({ token: "inst-token", expires_at: "2030-01-01T00:00:00Z" }),
       responseJson({ default_branch: "main" }),
       responseJson({ commit: { sha: "base-sha" } }),
       responseJson({ ref: "refs/heads/weave-test/demo", sha: "base-sha" }),
-      // commit flow
       responseJson({ id: 7, account: { login: "acme" } }),
       responseJson({ token: "inst-token", expires_at: "2030-01-01T00:00:00Z" }),
       responseJson({ object: { sha: "parent-sha" } }),
@@ -86,7 +83,6 @@ describe("github write flow", () => {
       responseJson({ sha: "tree-new" }),
       responseJson({ sha: "commit-new" }),
       responseJson({ ref: "refs/heads/weave-test/demo", sha: "commit-new" }),
-      // pr create
       responseJson({ id: 7, account: { login: "acme" } }),
       responseJson({ token: "inst-token", expires_at: "2030-01-01T00:00:00Z" }),
       responseJson({ default_branch: "main" }),
@@ -159,106 +155,33 @@ describe("github write flow", () => {
     ).rejects.toThrow(/because branch "weave-test" already exists/i);
   });
 
-  it("pushes git worktree changes and can create a missing branch", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "weave-gh-worktree-"));
-    const repoDir = path.join(dir, "repo");
-    fs.mkdirSync(repoDir, { recursive: true });
-    const git = await import("node:child_process");
-    git.execSync("git init", { cwd: repoDir, stdio: "ignore" });
-    git.execSync("git config user.email test@example.com", { cwd: repoDir, stdio: "ignore" });
-    git.execSync("git config user.name test", { cwd: repoDir, stdio: "ignore" });
-    fs.writeFileSync(path.join(repoDir, "tracked.txt"), "original", "utf-8");
-    fs.writeFileSync(path.join(repoDir, "removed.txt"), "bye", "utf-8");
-    git.execSync("git add . && git commit -m init", { cwd: repoDir, stdio: "ignore" });
-    fs.writeFileSync(path.join(repoDir, "tracked.txt"), "updated", "utf-8");
-    fs.writeFileSync(path.join(dir, "added.txt"), "new", "utf-8");
-    fs.copyFileSync(path.join(dir, "added.txt"), path.join(repoDir, "added.txt"));
-    fs.rmSync(path.join(repoDir, "removed.txt"));
+  it("commits as bot and pushes using git", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "weave-bot-push-"));
+    const { execSync } = require("node:child_process");
+    execSync("git init && git config user.email test@test.com && git config user.name test", { cwd: dir, stdio: "ignore" });
+    fs.writeFileSync(path.join(dir, "file.txt"), "hello", "utf-8");
+    execSync("git add . && git commit -m init", { cwd: dir, stdio: "ignore" });
 
-    const queue = [
-      // initial branch existence check => missing
-      responseJson({ id: 7, account: { login: "acme" } }),
-      responseJson({ token: "inst-token", expires_at: "2030-01-01T00:00:00Z" }),
-      responseJson({ message: "Not Found" }, 404),
-      // prefix branch check => missing
-      responseJson({ id: 7, account: { login: "acme" } }),
-      responseJson({ token: "inst-token", expires_at: "2030-01-01T00:00:00Z" }),
-      responseJson({ message: "Not Found" }, 404),
-      // create branch
-      responseJson({ id: 7, account: { login: "acme" } }),
-      responseJson({ token: "inst-token", expires_at: "2030-01-01T00:00:00Z" }),
-      responseJson({ default_branch: "main" }),
-      responseJson({ commit: { sha: "base-sha" } }),
-      responseJson({ ref: "refs/heads/bot-demo", sha: "base-sha" }),
-      // fetch ref after branch creation
-      responseJson({ object: { sha: "parent-sha" } }),
-      responseJson({ sha: "parent-sha", tree: { sha: "tree-base" } }),
-      responseJson({ sha: "blob-1" }),
-      responseJson({ sha: "blob-2" }),
-      responseJson({ sha: "tree-next" }),
-      responseJson({ sha: "commit-next" }),
-      responseJson({ ref: "refs/heads/bot-demo", sha: "commit-next" }),
-    ];
+    const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), "weave-bot-bare-"));
+    execSync("git init --bare", { cwd: bareDir, stdio: "ignore" });
+    execSync(`git remote add origin ${bareDir}`, { cwd: dir, stdio: "ignore" });
+    const branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: dir, encoding: "utf-8" }).trim();
+    execSync(`git push origin ${branch}`, { cwd: dir, stdio: "ignore" });
 
-    const result = await pushGithubWorktree(
-      makeConfig(),
-      {
-        branch: "bot-demo",
-        message: "Push worktree",
-        dir: repoDir,
-        createBranchIfMissing: true,
-      },
-      async () => queue.shift()!
-    );
-    expect(result.commitSha).toBe("commit-next");
-    expect(result.changedFiles).toContain("tracked.txt");
-    expect(result.changedFiles).toContain("added.txt");
-    expect(result.changedFiles).toContain("removed.txt (deleted)");
-  });
+    fs.writeFileSync(path.join(dir, "file.txt"), "updated", "utf-8");
 
-  it("uses bot token mode without GitHub App installation exchange", async () => {
-    const originalToken = process.env.WEAVE_TEST_GITHUB_BOT_TOKEN;
-    process.env.WEAVE_TEST_GITHUB_BOT_TOKEN = "bot-token";
+    const result = gitCommitAndPushAsBot({
+      branch,
+      message: "bot update",
+      dir,
+      botUsername: "test-bot",
+    });
 
-    try {
-      const calls: string[] = [];
-      const queue = [
-        responseJson({ message: "Not Found" }, 404),
-        responseJson({ default_branch: "main" }),
-        responseJson({ commit: { sha: "base-sha" } }),
-        responseJson({ ref: "refs/heads/weave-test", sha: "base-sha" }),
-      ];
+    expect(result.username).toBe("test-bot");
+    expect(result.email).toBe("test-bot@users.noreply.github.com");
+    expect(result.branch).toBe(branch);
 
-      const result = await createGithubBranch(
-        {
-          ...makeConfig(),
-          githubAuthMode: "token",
-        },
-        { branch: "weave-test" },
-        async (input) => {
-          calls.push(String(input));
-          return queue.shift()!;
-        }
-      );
-
-      expect(result.sha).toBe("base-sha");
-      expect(calls.some((url) => url.includes("/installation"))).toBe(false);
-      expect(calls.some((url) => url.includes("/git/refs"))).toBe(true);
-    } finally {
-      if (originalToken === undefined) delete process.env.WEAVE_TEST_GITHUB_BOT_TOKEN;
-      else process.env.WEAVE_TEST_GITHUB_BOT_TOKEN = originalToken;
-    }
-  });
-
-  it("parses git porcelain output", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "weave-gh-parse-"));
-    fs.writeFileSync(path.join(dir, "tracked.txt"), "updated", "utf-8");
-    fs.writeFileSync(path.join(dir, "added.txt"), "new", "utf-8");
-    const changes = parseGitStatusPorcelain(" M tracked.txt\n?? added.txt\n D removed.txt\n", dir);
-    expect(changes).toEqual([
-      { repoPath: "tracked.txt", kind: "upsert", content: "updated" },
-      { repoPath: "added.txt", kind: "upsert", content: "new" },
-      { repoPath: "removed.txt", kind: "delete" },
-    ]);
+    const log = execSync("git log -1 --format=%an", { cwd: dir, encoding: "utf-8" }).trim();
+    expect(log).toBe("test-bot");
   });
 });

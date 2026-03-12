@@ -29,7 +29,6 @@ export function getDefaultConfig(): WeaveConfig {
     defaultAgent: "assistant",
     workspacePath: path.join(WORKSPACES_DIR, "default.db"),
     githubApiBaseUrl: "https://api.github.com",
-    githubAuthMode: "app",
   };
 }
 
@@ -48,7 +47,6 @@ export function loadConfig(): WeaveConfig {
     }
   }
 
-  // Check environment variables
   const envKey =
     process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY;
   if (envKey) {
@@ -68,12 +66,6 @@ export function loadConfig(): WeaveConfig {
   if (process.env.GITHUB_REPO) config.githubRepo = process.env.GITHUB_REPO;
   if (process.env.GITHUB_API_BASE_URL)
     config.githubApiBaseUrl = process.env.GITHUB_API_BASE_URL;
-  if (process.env.WEAVE_TEST_GITHUB_AUTH_MODE === "app" || process.env.WEAVE_TEST_GITHUB_AUTH_MODE === "token") {
-    config.githubAuthMode = process.env.WEAVE_TEST_GITHUB_AUTH_MODE;
-  }
-  if (process.env.WEAVE_TEST_GITHUB_BOT_USERNAME) {
-    config.githubBotUsername = process.env.WEAVE_TEST_GITHUB_BOT_USERNAME;
-  }
 
   return config;
 }
@@ -83,7 +75,6 @@ export function saveConfig(config: Partial<WeaveConfig>): void {
   const existing = loadConfig();
   const merged = { ...existing, ...config };
 
-  // Don't persist workspacePath if it's the default
   const toSave: Record<string, unknown> = {};
   const defaults = getDefaultConfig();
   for (const [key, value] of Object.entries(merged)) {
@@ -101,7 +92,6 @@ export function getConfigValue(key: string): unknown {
 }
 
 const VALID_PROVIDERS: LLMProviderName[] = ["openai", "anthropic", "ollama", "lmstudio"];
-const VALID_GITHUB_AUTH_MODES = ["app", "token"] as const;
 
 export function setConfigValue(key: string, value: string): void {
   const update: Record<string, unknown> = {};
@@ -118,17 +108,11 @@ export function setConfigValue(key: string, value: string): void {
     update[key] = p;
   } else if (key === "githubApiBaseUrl") {
     try {
-      // Validate URL shape early.
       new URL(value);
     } catch {
       throw new Error("githubApiBaseUrl must be a valid URL");
     }
     update[key] = value.replace(/\/$/, "");
-  } else if (key === "githubAuthMode") {
-    if (!VALID_GITHUB_AUTH_MODES.includes(value as (typeof VALID_GITHUB_AUTH_MODES)[number])) {
-      throw new Error(`githubAuthMode must be one of: ${VALID_GITHUB_AUTH_MODES.join(", ")}`);
-    }
-    update[key] = value;
   } else {
     update[key] = value;
   }
@@ -155,7 +139,6 @@ export function listWorkspaces(): string[] {
 
 /**
  * Try to read OpenAI API key from Codex's auth.json (e.g. after `codex login --api-key`).
- * See: https://developers.openai.com/codex/auth/
  */
 export function getCodexAuthApiKey(): string | undefined {
   try {
@@ -207,12 +190,4 @@ export function getProviderBaseURL(
 
 export function getGithubApiBaseUrl(config?: Partial<WeaveConfig>): string {
   return config?.githubApiBaseUrl || process.env.GITHUB_API_BASE_URL || "https://api.github.com";
-}
-
-export function getGithubBotToken(config?: Partial<WeaveConfig>): string | undefined {
-  return (
-    process.env.WEAVE_TEST_GITHUB_BOT_TOKEN ||
-    process.env.GITHUB_TOKEN ||
-    process.env.GH_TOKEN
-  );
 }

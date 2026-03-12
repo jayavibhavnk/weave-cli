@@ -109,7 +109,7 @@ export const builtinTools: ToolDef[] = [
   },
   {
     name: "github_get_branch",
-    description: "Get the latest commit SHA for a branch through the configured GitHub App.",
+    description: "Get the latest commit SHA for a branch.",
     parameters: {
       type: "object",
       properties: {
@@ -123,7 +123,7 @@ export const builtinTools: ToolDef[] = [
   },
   {
     name: "github_create_branch",
-    description: "Create a branch in GitHub through the configured GitHub App.",
+    description: "Create a branch in GitHub via the GitHub App.",
     parameters: {
       type: "object",
       properties: {
@@ -137,29 +137,8 @@ export const builtinTools: ToolDef[] = [
     requiresApproval: true,
   },
   {
-    name: "github_create_commit",
-    description: "Create a commit on a GitHub branch from local files via the GitHub App.",
-    parameters: {
-      type: "object",
-      properties: {
-        owner: { type: "string", description: "GitHub owner or organization" },
-        repo: { type: "string", description: "GitHub repository" },
-        branch: { type: "string", description: "Target branch" },
-        message: { type: "string", description: "Commit message" },
-        dir: { type: "string", description: "Local project directory" },
-        file_paths: {
-          type: "array",
-          description: "Files relative to dir to include",
-          items: { type: "string" },
-        },
-      },
-      required: ["branch", "message", "dir", "file_paths"],
-    },
-    requiresApproval: true,
-  },
-  {
     name: "github_create_pr",
-    description: "Create a pull request through the configured GitHub App.",
+    description: "Create a pull request via the GitHub App.",
     parameters: {
       type: "object",
       properties: {
@@ -175,23 +154,17 @@ export const builtinTools: ToolDef[] = [
     requiresApproval: true,
   },
   {
-    name: "github_push_worktree",
-    description: "Push the current local git worktree changes to a GitHub branch through the configured GitHub App.",
+    name: "github_push",
+    description: "Commit all changes as the weave-cli bot identity and push to a branch. Uses the user's existing git credentials for the push; the commit author is set to the bot so it appears as a contributor.",
     parameters: {
       type: "object",
       properties: {
-        owner: { type: "string", description: "GitHub owner or organization" },
-        repo: { type: "string", description: "GitHub repository" },
         branch: { type: "string", description: "Target branch name" },
         message: { type: "string", description: "Commit message" },
         dir: { type: "string", description: "Local git repository directory" },
-        create_branch_if_missing: {
-          type: "boolean",
-          description: "Create the branch first if it does not exist",
-        },
-        base_branch: { type: "string", description: "Base branch when creating a missing branch" },
+        bot_username: { type: "string", description: "Bot GitHub username (defaults to weave-cli)" },
       },
-      required: ["branch", "message", "dir"],
+      required: ["branch", "message"],
     },
     requiresApproval: true,
   },

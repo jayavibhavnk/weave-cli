@@ -101,8 +101,6 @@ export interface WeaveConfig {
   githubOwner?: string;
   githubRepo?: string;
   githubApiBaseUrl?: string;
-  githubAuthMode?: "app" | "token";
-  githubBotUsername?: string;
 }
 
 export interface ChatMessage {
