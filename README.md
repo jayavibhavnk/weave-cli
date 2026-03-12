@@ -1,6 +1,8 @@
 # weave
 
-**Graph-native memory CLI for AI agents.** Chat with AI that actually remembers — across sessions, across agents.
+**Testing-native memory CLI for AI agents.** Run multi-step test workflows with persistent memory across sessions and specialized QA agents.
+
+> CLI binary name: `weave-test` (replace any older `weave` examples with `weave-test`).
 
 ```
   ◈ weave v0.1.0
@@ -9,14 +11,15 @@
 
 ## What is Weave?
 
-Weave is a terminal CLI agent (like Claude Code) with a twist: **persistent, graph-structured memory**. Every conversation is remembered. Memories are connected by semantic similarity, temporal sequence, and shared entities. Your agents build knowledge over time — they never cold-start.
+Weave is a terminal CLI agent (like Claude Code) focused on **software testing and quality improvement**. It combines **persistent graph memory** with **multi-agent QA roles** so each run gets smarter over time.
 
-Built on the MemWeave memory architecture:
+Built on the MemWeave memory architecture plus a test orchestration layer:
 - **Multi-layer memory graph** — semantic, temporal, causal, and entity edges
 - **Tiered memory** — working → short-term → long-term → archival with automatic promotion and decay
-- **Multi-agent** — spawn multiple agents with different personas that share a memory fabric
+- **Multi-agent** — testing personas (orchestrator, edge-case hunter, report analyst) share a memory fabric
 - **Hybrid retrieval** — vector similarity + graph traversal for smarter recall
 - **Local-first** — works with just hash-based embeddings + SQLite, no cloud required for memory
+- **Testing pipeline** — command discovery (`lint`, `typecheck`, `test`, `integration`, `e2e`, `build`) with clear run reports
 
 ## Install
 
@@ -43,8 +46,11 @@ weave init
 # Set your API key (or use Codex auth — see below)
 weave config set apiKey sk-your-openai-key
 
-# Start chatting (memories persist automatically)
-weave chat
+# Initialize testing agents
+weave test init
+
+# Run the testing pipeline on current project
+weave test run
 
 # Or use Anthropic
 weave config set provider anthropic
@@ -64,6 +70,83 @@ weave chat
 ```
 
 ## Commands
+
+### Testing (Primary)
+
+```bash
+weave test init                         # create test-focused agents
+weave test run                          # discover and run tests in current dir
+weave test plan                         # preview discovered + autonomous plan
+weave test run --dir ../my-app          # run against another project
+weave test run --workspace release      # keep separate test memory per workspace
+weave test run --provider anthropic     # use another model provider
+weave test run --model gpt-4o-mini      # choose specific model for insights
+weave test run --max-auto 5             # add up to 5 autonomous expansions
+weave test run --no-autonomous          # run only discovered commands
+
+weave-test automation create --name "nightly smoke" --dir . --every 1d
+weave-test automation remind "in 45 minutes" --name "rerun tests" --dir .
+weave-test automation list
+weave-test automation run <id>
+weave-test automation daemon            # keep scheduler running locally
+```
+
+The testing workflow:
+- discovers test commands from project scripts/runtime,
+- optionally proposes additional safe commands using autonomous planning (`--max-auto > 0`),
+- runs them as a multi-step pipeline,
+- analyzes failures and edge-case gaps,
+- persists run intelligence to memory for future sessions.
+
+### Automations
+
+`weave-test` now supports durable test automations:
+
+- `automation create` for recurring schedules via `--every` or `--cron`
+- `automation remind` for one-time reminders/check-backs
+- `automation loop` as a Claude-style recurring shortcut
+- `automation daemon` to keep due automations running locally
+
+Examples:
+
+```bash
+weave-test automation create --name "daily regression" --dir . --every 1d
+weave-test automation create --name "weekday smoke" --dir . --cron "0 9 * * 1-5"
+weave-test automation remind "in 2 hours" --name "rerun failed checks" --dir .
+weave-test automation loop 30m --name "poll health" --dir . --target testPlan
+weave-test automation list
+weave-test automation pause <id>
+weave-test automation resume <id>
+weave-test automation run <id>
+weave-test automation daemon --poll-ms 10000
+```
+
+### GitHub App Writes
+
+`weave-test` can now write to GitHub through a GitHub App installation identity instead of your local `git push`.
+
+Configure the app:
+
+```bash
+weave-test github app init \
+  --app-id 123456 \
+  --private-key-path /path/to/github-app.pem \
+  --owner your-org \
+  --repo your-repo
+
+weave-test github app status
+weave-test github repo connect --owner your-org --repo your-repo --save-defaults
+```
+
+Create a branch, commit local files to GitHub, and open a PR:
+
+```bash
+weave-test github branch create --branch weavetest/demo --base main
+weave-test github commit --branch weavetest/demo --message "Update test flow" --dir . src/index.ts README.md
+weave-test github pr create --title "Update test flow" --head weavetest/demo --base main
+```
+
+`weave-test github push` is also available as a commit-and-update-ref alias if you prefer that wording.
 
 ### Chat
 
