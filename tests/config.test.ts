@@ -20,6 +20,7 @@ describe("config", () => {
       expect(c.embeddingBackend).toBe("local");
       expect(c.embeddingDim).toBe(256);
       expect(typeof c.workspacePath).toBe("string");
+      expect(c.githubApiBaseUrl).toBe("https://api.github.com");
     });
   });
 
@@ -82,6 +83,18 @@ describe("config", () => {
     it("throws for non-numeric embeddingDim", () => {
       expect(() => setConfigValue("embeddingDim", "abc")).toThrow(
         /embeddingDim must be a number/
+      );
+    });
+
+    it("throws for invalid githubApiBaseUrl", () => {
+      expect(() => setConfigValue("githubApiBaseUrl", "not-a-url")).toThrow(
+        /githubApiBaseUrl must be a valid URL/
+      );
+    });
+
+    it("throws for invalid githubAuthMode", () => {
+      expect(() => setConfigValue("githubAuthMode", "bad-mode")).toThrow(
+        /githubAuthMode must be one of: app, token/
       );
     });
   });

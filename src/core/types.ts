@@ -95,6 +95,14 @@ export interface WeaveConfig {
   embeddingDim: number;
   defaultAgent: string;
   workspacePath: string;
+  githubAppId?: string;
+  githubAppPrivateKeyPath?: string;
+  githubAppPrivateKey?: string;
+  githubOwner?: string;
+  githubRepo?: string;
+  githubApiBaseUrl?: string;
+  githubAuthMode?: "app" | "token";
+  githubBotUsername?: string;
 }
 
 export interface ChatMessage {

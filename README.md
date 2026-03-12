@@ -121,6 +121,33 @@ weave-test automation run <id>
 weave-test automation daemon --poll-ms 10000
 ```
 
+### GitHub App Writes
+
+`weave-test` can now write to GitHub through a GitHub App installation identity instead of your local `git push`.
+
+Configure the app:
+
+```bash
+weave-test github app init \
+  --app-id 123456 \
+  --private-key-path /path/to/github-app.pem \
+  --owner your-org \
+  --repo your-repo
+
+weave-test github app status
+weave-test github repo connect --owner your-org --repo your-repo --save-defaults
+```
+
+Create a branch, commit local files to GitHub, and open a PR:
+
+```bash
+weave-test github branch create --branch weavetest/demo --base main
+weave-test github commit --branch weavetest/demo --message "Update test flow" --dir . src/index.ts README.md
+weave-test github pr create --title "Update test flow" --head weavetest/demo --base main
+```
+
+`weave-test github push` is also available as a commit-and-update-ref alias if you prefer that wording.
+
 ### Chat
 
 ```bash

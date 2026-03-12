@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
+import * as path from "node:path";
 import { Command } from "commander";
 import {
   loadConfig,
+  saveConfig,
   setConfigValue,
   getConfigValue,
   resolveApiKey,
@@ -791,6 +793,292 @@ automationCmd
     });
     console.log(renderAutomationCreated(record));
     store.close();
+  });
+
+// ── weave-test github ─────────────────────────────────────
+const githubCmd = program.command("github").description("GitHub-backed repository actions");
+const githubAuthCmd = githubCmd.command("auth").description("Choose how GitHub writes authenticate");
+
+const githubAppCmd = githubCmd.command("app").description("Manage GitHub App configuration");
+
+githubAuthCmd
+  .command("use-app")
+  .description("Use GitHub App auth for future GitHub commands")
+  .action(() => {
+    saveConfig({ githubAuthMode: "app" });
+    console.log(successLine("GitHub auth mode set to app."));
+  });
+
+githubAuthCmd
+  .command("use-bot")
+  .description("Use a bot token for future GitHub commands")
+  .option("--username <name>", "Bot GitHub username")
+  .action((options) => {
+    saveConfig({
+      githubAuthMode: "token",
+      githubBotUsername: options.username,
+    });
+    console.log(successLine("GitHub auth mode set to token."));
+    if (!process.env.WEAVE_TEST_GITHUB_BOT_TOKEN && !process.env.GITHUB_TOKEN && !process.env.GH_TOKEN) {
+      console.log("");
+      console.log(errorLine("Set WEAVE_TEST_GITHUB_BOT_TOKEN (or GITHUB_TOKEN / GH_TOKEN) before using token mode."));
+    }
+  });
+
+githubAuthCmd
+  .command("status")
+  .description("Show the currently selected GitHub auth mode")
+  .action(async () => {
+    try {
+      const config = loadConfig();
+      const { getGithubAuthStatus } = await import("./github/write-flow.js");
+      const { renderGithubAuthStatus } = await import("./github/cli.js");
+      console.log(renderGithubAuthStatus(getGithubAuthStatus(config)));
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+githubAppCmd
+  .command("init")
+  .description("Save GitHub App configuration")
+  .requiredOption("--app-id <id>", "GitHub App ID")
+  .option("--private-key-path <path>", "Path to GitHub App private key PEM file")
+  .option("--owner <owner>", "Default GitHub owner/org")
+  .option("--repo <repo>", "Default GitHub repository")
+  .option("--api-base-url <url>", "GitHub API base URL")
+  .action((options) => {
+    if (!options.privateKeyPath && !process.env.GITHUB_APP_PRIVATE_KEY) {
+      console.log(errorLine("Provide --private-key-path or set GITHUB_APP_PRIVATE_KEY."));
+      process.exit(1);
+    }
+    saveConfig({
+      githubAppId: options.appId,
+      githubAppPrivateKeyPath: options.privateKeyPath,
+      githubOwner: options.owner,
+      githubRepo: options.repo,
+      githubApiBaseUrl: options.apiBaseUrl,
+    });
+    console.log(successLine("GitHub App configuration saved."));
+  });
+
+githubAppCmd
+  .command("status")
+  .description("Verify GitHub App auth and show current defaults")
+  .action(async () => {
+    try {
+      const config = loadConfig();
+      const { getGithubAppStatus } = await import("./github/write-flow.js");
+      const { renderGithubStatus } = await import("./github/cli.js");
+      const status = await getGithubAppStatus(config);
+      console.log(renderGithubStatus(status));
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+const githubRepoCmd = githubCmd.command("repo").description("Inspect and connect repositories");
+const githubBranchCmd = githubCmd.command("branch").description("Branch actions");
+
+githubRepoCmd
+  .command("connect")
+  .description("Verify repo access and optionally save defaults")
+  .requiredOption("--owner <owner>", "GitHub owner/org")
+  .requiredOption("--repo <repo>", "GitHub repository")
+  .option("--save-defaults", "Save owner/repo as defaults")
+  .action(async (options) => {
+    try {
+      const config = loadConfig();
+      const { listConnectedRepos } = await import("./github/write-flow.js");
+      const { renderGithubRepos } = await import("./github/cli.js");
+      const repos = await listConnectedRepos(config, options.owner, options.repo);
+      const match = repos.find((repo) => repo.full_name === `${options.owner}/${options.repo}`);
+      if (!match) {
+        console.log(errorLine(`GitHub access is not configured for ${options.owner}/${options.repo}.`));
+        process.exit(1);
+      }
+      if (options.saveDefaults) {
+        saveConfig({ githubOwner: options.owner, githubRepo: options.repo });
+      }
+      console.log("");
+      console.log(renderGithubRepos([match]));
+      console.log("");
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+githubBranchCmd
+  .command("create")
+  .description("Create a branch through the configured GitHub auth mode")
+  .requiredOption("--branch <name>", "Branch name to create")
+  .option("--base <branch>", "Base branch")
+  .option("--owner <owner>", "GitHub owner/org")
+  .option("--repo <repo>", "GitHub repository")
+  .action(async (options) => {
+    try {
+      const config = loadConfig();
+      const { createGithubBranch } = await import("./github/write-flow.js");
+      const { renderBranchCreated } = await import("./github/cli.js");
+      const result = await createGithubBranch(config, {
+        owner: options.owner,
+        repo: options.repo,
+        branch: options.branch,
+        baseBranch: options.base,
+      });
+      console.log(renderBranchCreated(result));
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+async function handleGithubCommitLike(
+  options: {
+    owner?: string;
+    repo?: string;
+    branch: string;
+    message: string;
+    dir: string;
+    paths: string[];
+  }
+): Promise<void> {
+  const config = loadConfig();
+  const { createGithubCommitFromFiles } = await import("./github/write-flow.js");
+  const { renderCommitResult } = await import("./github/cli.js");
+  const result = await createGithubCommitFromFiles(config, {
+    owner: options.owner,
+    repo: options.repo,
+    branch: options.branch,
+    message: options.message,
+    dir: options.dir,
+    filePaths: options.paths,
+  });
+  console.log(renderCommitResult(result));
+}
+
+async function handleGithubWorktreePush(
+  options: {
+    owner?: string;
+    repo?: string;
+    branch: string;
+    message: string;
+    dir: string;
+    createBranchIfMissing?: boolean;
+    base?: string;
+  }
+): Promise<void> {
+  const config = loadConfig();
+  const { pushGithubWorktree } = await import("./github/write-flow.js");
+  const { renderCommitResult } = await import("./github/cli.js");
+  const result = await pushGithubWorktree(config, {
+    owner: options.owner,
+    repo: options.repo,
+    branch: options.branch,
+    message: options.message,
+    dir: options.dir,
+    createBranchIfMissing: options.createBranchIfMissing,
+    baseBranch: options.base,
+  });
+  console.log(renderCommitResult(result));
+}
+
+githubCmd
+  .command("commit")
+  .description("Create a commit on a GitHub branch from local files")
+  .requiredOption("--branch <name>", "Target branch name")
+  .requiredOption("--message <text>", "Commit message")
+  .requiredOption("--dir <path>", "Local project directory")
+  .option("--owner <owner>", "GitHub owner/org")
+  .option("--repo <repo>", "GitHub repository")
+  .argument("<paths...>", "Files relative to --dir to include")
+  .action(async (paths, options) => {
+    try {
+      await handleGithubCommitLike({ ...options, paths });
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+githubCmd
+  .command("push")
+  .description("Push current local git worktree changes to a branch")
+  .requiredOption("--branch <name>", "Target branch name")
+  .requiredOption("--message <text>", "Commit message")
+  .requiredOption("--dir <path>", "Local project directory")
+  .option("--owner <owner>", "GitHub owner/org")
+  .option("--repo <repo>", "GitHub repository")
+  .option("--create-branch-if-missing", "Create the branch first if it does not exist")
+  .option("--base <branch>", "Base branch when creating a missing branch")
+  .action(async (options) => {
+    try {
+      await handleGithubWorktreePush({
+        ...options,
+        createBranchIfMissing: options.createBranchIfMissing,
+      });
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+githubCmd
+  .command("bot-push")
+  .description("Commit as the bot identity and push (like Cursor / Claude Code)")
+  .requiredOption("--branch <name>", "Target branch name")
+  .requiredOption("--message <text>", "Commit message")
+  .option("--dir <path>", "Local project directory", ".")
+  .option("--bot-username <name>", "Bot GitHub username", "weave-cli")
+  .action(async (options) => {
+    try {
+      const { gitCommitAndPushAsBot } = await import("./github/write-flow.js");
+      const { renderBotPushResult } = await import("./github/cli.js");
+      const result = gitCommitAndPushAsBot({
+        branch: options.branch,
+        message: options.message,
+        dir: path.resolve(options.dir),
+        botUsername: options.botUsername,
+      });
+      console.log(renderBotPushResult(result));
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
+  });
+
+const githubPrCmd = githubCmd.command("pr").description("Pull request actions");
+
+githubPrCmd
+  .command("create")
+  .description("Create a pull request")
+  .requiredOption("--title <text>", "Pull request title")
+  .requiredOption("--head <branch>", "Head branch")
+  .option("--body <text>", "Pull request body", "")
+  .option("--base <branch>", "Base branch")
+  .option("--owner <owner>", "GitHub owner/org")
+  .option("--repo <repo>", "GitHub repository")
+  .action(async (options) => {
+    try {
+      const config = loadConfig();
+      const { createGithubPullRequest } = await import("./github/write-flow.js");
+      const { renderPullRequestResult } = await import("./github/cli.js");
+      const result = await createGithubPullRequest(config, {
+        owner: options.owner,
+        repo: options.repo,
+        title: options.title,
+        body: options.body,
+        head: options.head,
+        base: options.base,
+      });
+      console.log(renderPullRequestResult(result));
+    } catch (err) {
+      console.log(errorLine(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    }
   });
 
 // ── weave config ───────────────────────────────────────────
